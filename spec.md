@@ -7,35 +7,41 @@
 
 ---
 
-## Problem
+## Problem Statement
 
-Creating a full brand identity is slow, expensive, and most AI-generated brand assets look generic. The missing ingredient isn't speed — it's **human creative context** and **visual knowledge depth**: the feeling, the references, the understanding of what great design looks like across industries.
+When a company needs a brand identity, there are two options — both are painful:
 
-This agent solves three problems:
-1. **Generic output:** Structured moodboard + personality keywords + rich visual knowledge base force intentional, non-templated generation
-2. **Limited creative range:** Agent continuously learns from high-quality design sources (Pinterest, Behance, agency portfolios) — like a junior designer enriching their visual library over time
-3. **Production bottleneck:** Once a direction is chosen, all assets auto-build, vectorize, and upload to Figma
+| | In-house | Agency |
+|--|----------|--------|
+| **Time** | Minimum 1 week | Minimum 1 month |
+| **Cost** | Staff time + tools | $5,000–$50,000+ |
+| **Problem** | Slow iteration, hard to test and validate quickly | Expensive, slow feedback loops, limited revisions |
+
+For early-stage products and internal teams, this is a critical bottleneck. By the time the brand is ready, the market opportunity may have shifted. Teams can't move fast, can't test multiple brand directions, and can't afford to get it wrong.
+
+Existing AI tools don't solve this — they generate visuals but produce generic, templated output because they lack the creative context that makes a brand distinctive: curated visual references, detailed personality descriptions, and deep knowledge of what great design looks like across industries.
+
+**This agent reduces brand identity creation from weeks (or months) to hours — at near-zero cost — while maintaining the creative intentionality of a professional designer. Teams can test multiple directions, validate with their audience, and iterate fast.**
 
 ---
 
 ## Input
 
-### 1. Project Brief
-Auto-detected, either or both:
-- **Logo file** (AI + PNG) — agent extracts colors, style, form language
+### 1. Project Brief (auto-detected)
+- **Logo file** (AI + PNG) — agent extracts colors, style, form language, OR
 - **spec.md** — brand name, product description, target audience, tone of voice
 
 ### 2. Structured Moodboard
-Images organized into labeled folders — required for accurate interpretation:
+Organized into labeled folders — labels required, AI cannot self-identify categories from unlabeled dumps:
 
 ```
 /moodboard
   /logo-style       ← logo form, shape language, construction style
-  /graphic-style    ← illustration style, graphic elements, visual texture
+  /graphic-style    ← illustration, graphic elements, visual texture
   /typography       ← typeface references, lettering style
   /color-mood       ← color palette, atmosphere, emotional tone
 ```
-10–15+ images total. Labels are required — AI cannot reliably self-identify reference categories from unlabeled image dumps.
+10–15+ images total.
 
 ### 3. Brand Personality Keywords
 Specific sensory and emotional descriptions — not generic adjectives:
@@ -46,11 +52,11 @@ Specific sensory and emotional descriptions — not generic adjectives:
 Minimum 5 keywords, each with 2–3 sentence explanation.
 
 ### 4. Logo Symbol Direction
-- Designer specifies what symbol/icon the logo should contain, OR
-- Leave open → agent researches and proposes suitable symbols based on brand context
+- Designer specifies symbol/icon the logo should contain, OR
+- Leave open → agent proposes suitable symbols based on brand context and product category
 
 ### 5. Mockup Library
-A labeled collection of product mockups used to assemble stylescapes:
+Labeled product mockups for stylescape assembly:
 ```
 /mockups
   /social-media     ← phone screens, X/Twitter post mockups
@@ -59,94 +65,92 @@ A labeled collection of product mockups used to assemble stylescapes:
   /apparel          ← t-shirts, caps, merchandise
   /signage          ← outdoor, environmental
 ```
-Quality mockups are critical for stylescapes that look professional, not AI-generated. This library is maintained and expanded over time.
 
 ---
 
 ## Agent Visual Knowledge Base
 
-A core quality differentiator. The agent continuously learns from high-quality design sources — like a junior designer enriching their visual library:
+The agent continuously learns from high-quality design sources — like a designer enriching their visual library:
 
-**Automated learning pipeline:**
 ```
-Agent periodically crawls:
-  → Pinterest boards (curated design, branding, typography)
-  → Behance (top brand identity projects, filtered by quality signals)
+Automated crawl pipeline:
+  → Pinterest boards (branding, typography, identity design)
+  → Behance (top brand identity projects)
   → Design agency portfolios (Pentagram, Collins, DesignStudio, etc.)
-  → Industry-specific visual references per product category
+  → Industry-specific references per product category
 
-→ Extracted visuals tagged by: style, industry, color system, era, mood
+→ Extracted visuals tagged by: style, industry, color system, mood
 → Stored in visual knowledge base
-→ Used to inform Option 1 (market research) and Option 4 (Wild)
+→ Used to inform Option 1 (market-aligned) and Option 4 (Wild Card)
 ```
-
-This transforms the agent from "generating from prompt" to "generating from a deep, curated understanding of what great design looks like" — the same advantage a senior designer has over a junior one.
 
 ---
 
 ## 4 Brand Identity Options
 
-Each spec produces **4 distinct identity directions** — genuinely different strategic and creative positions:
-
 ### Option 1 — Market-Aligned
-Agent researches similar products and competitors → analyzes current design trends for this product category → synthesizes a direction that fits market expectations, done well.
-
-*"What the market currently expects from a brand like this."*
+Agent researches competitors and design trends for this product category → synthesizes a direction that fits market expectations, executed well.
 
 ### Option 2 — Designer-Led
-Built entirely from the designer's moodboard. Agent maps structured references to design decisions — color, typography, graphic style, logo form.
-
-*"What the designer sees when they imagine this brand."*
+Built entirely from the designer's structured moodboard. Agent maps references to color, typography, graphic style, and logo form decisions.
 
 ### Option 3 — Hybrid
-A reasoned balance between market research and designer instinct. Agent proposes which elements should follow market norms (trust, recognition) and which should differentiate (memorability, personality). Includes a brief rationale for each decision.
-
-*"Where to conform, where to stand out — and why."*
+Reasoned balance between market research and designer instinct. Agent proposes which elements follow market norms (trust/recognition) and which differentiate (memorability). Includes written rationale for each decision.
 
 ### Option 4 — Wild Card
-Fully agent-driven. No moodboard constraint, no market following. Agent draws from its visual knowledge base and its own understanding of the product to propose a direction no one asked for — but might be exactly right.
+Fully agent-driven. No moodboard constraint. Agent draws from its visual knowledge base and product understanding to propose a direction no one asked for — but might be exactly right.
 
-*"What the agent would do if given complete creative freedom."*
+---
+
+## Human-in-the-Loop
+
+Brand identity is a deeply subjective, high-stakes decision. The agent supports iterative refinement at every stage — the designer is always in control:
+
+**After Phase 1 (Stylescape review):**
+- Designer selects 1 of 4 directions, OR
+- Requests a remix: *"Take the color system from Option 1 and the typography from Option 3"*
+- Requests a specific adjustment: *"Option 2 but make it feel less corporate, more playful"*
+- Agent regenerates based on feedback — as many rounds as needed before moving to Phase 2
+
+**After Phase 2 (Asset review):**
+- Designer reviews each asset category (logo, palette, templates)
+- Can request targeted refinements: *"Logo icon feels too sharp — soften the geometry"*
+- Each feedback loop triggers only the relevant part of the pipeline — no full regeneration needed
+
+**Design philosophy:** AI proposes, designer decides. The agent is a Creative Director's tool, not a replacement.
 
 ---
 
 ## Output Structure
 
-### Phase 1 — Stylescape Presentation (4 Directions)
+### Phase 1 — Stylescape Presentation
 
-Each of the 4 directions is presented as a **stylescape** — not a slide deck, but a visual composition that shows the full feeling of the brand direction at a glance:
+4 stylescapes — one per direction. Each is a high-resolution visual composition (like the NuRange / Behance examples) assembled in Illustrator using the mockup library:
 
-**Each stylescape contains:**
-- Logo concept / symbol direction
-- Color palette applied in context
-- Typography in use (headlines, body, labels)
+Each stylescape contains:
+- Logo concept + symbol rationale
+- Color palette in context
+- Typography in use
 - Graphic elements / patterns
-- Brand applied to mockups from the mockup library:
-  - X banner mockup
-  - Social post example
-  - Product / merchandise mockup (if relevant)
-- Direction name + 2–3 sentence strategic rationale
+- Brand applied to 2–3 mockups (X banner, social post, product)
+- Direction name + strategic rationale (2–3 sentences)
 
-**Format:** High-resolution image (PNG) — like the NuRange / Behance examples — assembled in Illustrator, exported flat. Ready to share with stakeholders for direction sign-off.
+**Format:** High-res PNG, assembled in Illustrator — ready to share for stakeholder sign-off.
 
----
+### Phase 2 — Full Asset Build (After Direction Selected)
 
-### Phase 2 — Full Asset Build (After Direction is Chosen)
-
-Once one direction is selected:
-
-**Brand Foundation Files**
-- Logo: all sizes and versions (primary, secondary, icon, dark/light variants)
+**Brand Foundation**
+- Logo: all sizes and versions (primary, secondary, icon, dark/light)
 - Color system: HEX, RGB, CMYK + usage rules
-- Typography: font files + usage hierarchy
-- Graphic elements / patterns: vector files
+- Typography: font files + hierarchy
+- Graphic elements / patterns: vector files (AI + SVG)
 
 **Image → Vector Conversion**
-- Gemini generates raster (PNG) → Illustrator auto-traces → exports AI + SVG
-- All brand assets production-ready for print, web, large format
+- Gemini generates raster PNG → Illustrator auto-traces → exports AI + SVG
+- All assets production-ready for print, web, large format
 
-**Social Media Template System (X / Twitter)**
-Built in Illustrator with chosen brand system pre-applied:
+**Social Media Templates (X / Twitter)**
+5 template types × 4 layout options each, vector, copy-swappable via Illustrator Variables:
 
 | Template | Purpose |
 |----------|---------|
@@ -156,12 +160,27 @@ Built in Illustrator with chosen brand system pre-applied:
 | Feature Introduction | Product features |
 | Information-heavy | Data, stats, tables |
 
-Each template: 4 layout options, vector, copy-swappable via Illustrator Variables
-
 **Figma Auto-Upload**
 - All assets uploaded via Figma API
-- Color styles, text styles, logo components, template frames created automatically
+- Color styles, text styles, logo components, template frames auto-created
 - Team builds immediately from the component system
+
+---
+
+## Technical Stack & Constraints
+
+| Tool | Role | Constraint |
+|------|------|------------|
+| **Claude** | Orchestration, research, brief generation, prompt engineering | Cannot generate images directly — outputs text prompts and structured decisions |
+| **Gemini API (paid)** | Visual generation — raster PNG, no watermark | Outputs raster only — cannot generate vector files directly |
+| **Illustrator + JSX** | Raster → vector conversion, stylescape assembly, template system, export | Requires pre-built templates and scripts; JSX complexity = highest technical risk |
+| **Figma API** | Auto-upload components, styles, templates | API write access requires Figma editor token; component structure must be predefined |
+| **Claude web search + Firecrawl** | Market research, visual knowledge base crawling | X/Twitter may block scraping — manual input fallback available |
+
+**Known constraints:**
+- Logo vectorization quality depends on Gemini output resolution — complex logos may need manual cleanup
+- Illustrator JSX scripting is the most technically challenging part — Arthur/Lucas review required Day 2
+- Figma API upload is Priority 2 — deprioritized if JSX takes longer than expected
 
 ---
 
@@ -182,11 +201,11 @@ Gemini generates visual assets for all 4 directions
 Illustrator: assembles 4 stylescapes using mockup library
   │
   ↓
-Phase 1 Output: 4 stylescape images → stakeholder selects direction
+Phase 1 Output: 4 stylescapes → designer reviews → selects / requests refinement
   │
-  ↓ [Direction selected]
+  ↓ [Direction confirmed]
   │
-Gemini generates full asset set for chosen direction
+Gemini generates full asset set
 Illustrator: raster → vector, social template system
 Figma API: auto-upload complete brand library
   │
@@ -197,46 +216,47 @@ New assets → saved to brand library + visual knowledge base
 
 ---
 
-## Tool Stack
-
-| Tool | Role |
-|------|------|
-| **Claude** | Market research, moodboard analysis, keyword interpretation, design brief, prompt engineering, workflow orchestration |
-| **Gemini API (paid)** | Visual generation — no watermark |
-| **Illustrator + JSX** | Stylescape assembly, image→vector, template system, batch export |
-| **Figma API** | Auto-upload brand components, styles, templates |
-| **Claude web search + Firecrawl** | Market research (Option 1) + visual knowledge base crawling (Behance, Pinterest, agency sites) |
-
----
-
 ## MVP Scope (4 Days)
 
 **Priority 1**
-- Input handling: brief + structured moodboard + keywords + mockup library
-- All 4 identity directions generated
-- Phase 1: 4 stylescapes assembled in Illustrator
+- Input handling: brief + moodboard + keywords + mockup library
+- All 4 directions generated + 4 stylescapes assembled
+- Human-in-the-loop refinement loop (Phase 1)
 - Phase 2: full asset build for selected direction
 - Image → vector via Illustrator
 
 **Priority 2 — if time allows**
-- Visual knowledge base crawling pipeline
 - Social template system (3 of 5 types)
 - Figma API auto-upload
+- Visual knowledge base crawling pipeline
 
 **Out of scope (roadmap)**
-- Full Figma component library automation
 - Landing page generation
 - Real-time trend monitoring
+- Multi-platform format export
+
+---
+
+## Success Metrics
+
+| Metric | Target |
+|--------|--------|
+| **Time to Phase 1 output** | 4 stylescapes generated in < 30 minutes from brief input |
+| **Direction approval rate** | At least 1 of 4 directions approved by designer without full regeneration |
+| **Refinement rounds** | Designer reaches final direction in ≤ 3 feedback iterations |
+| **Phase 2 completeness** | Full asset kit exported (logo versions, palette, 3+ templates) within 1 hour of direction selection |
+| **Vector quality** | Logo vector output usable without manual cleanup in ≥ 70% of cases |
+| **Designer satisfaction** | Output does not look "AI-generated" — passes designer's quality bar |
 
 ---
 
 ## Why This Agent Matters
 
-- **Non-generic:** Structured moodboard + rich visual knowledge base → intentional, brand-specific output
-- **4 real directions:** Market, designer, hybrid, wild — genuine creative options, not variations
-- **Stylescape format:** Stakeholders see the full brand feeling instantly, not abstract color swatches
-- **Self-improving:** Visual knowledge base grows over time → output quality improves continuously
-- **Zero handoff:** Chosen direction → Figma library automatically
+- **Cost:** Reduces brand identity creation from $5k–$50k agency cost to near zero
+- **Speed:** Weeks → hours, with multiple directions to choose from
+- **Non-generic:** Structured input + growing visual knowledge base = intentional output
+- **Collaborative:** Human-in-the-loop at every decision point — AI proposes, designer decides
+- **Self-improving:** Visual knowledge base grows over time → output quality increases continuously
 
 ---
 
