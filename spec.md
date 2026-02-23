@@ -1,120 +1,198 @@
 # Brand Identity Generator
+> Become Creative Director — Cook Series | Đào Hải Sơn
 
-## Become Creative Director — Cook Series | Đào Hải Sơn
+---
 
-> "From a logo (or project spec) + moodboard + brand personality keywords — the agent generates a complete, non-generic brand identity kit: visual system, social templates, and a Figma component library. Human creative direction in, production-ready assets out."
+> **"From a project spec + structured moodboard + brand personality keywords — the agent generates 4 distinct brand identity directions as stylescapes, ready for stakeholder review. One direction chosen → full asset kit built, vectorized, and uploaded to Figma automatically."**
 
 ---
 
 ## Problem
 
-Building a full brand identity from scratch is slow, expensive, and most AI-generated brand assets look generic. The missing ingredient isn't the logo or the brief — it's human creative context: the feeling, the personality, the visual references that make a brand distinctly itself.
+Creating a full brand identity is slow, expensive, and most AI-generated brand assets look generic. The missing ingredient isn't speed — it's **human creative context** and **visual knowledge depth**: the feeling, the references, the understanding of what great design looks like across industries.
 
-This agent solves that by requiring the designer to input rich creative context upfront — moodboard + detailed brand personality keywords — so the AI generates assets that feel intentional, not templated.
-
-**Key insight:** Professional brand designers differ from AI not in execution speed, but in the ability to deeply understand a brand's feeling and translate it into a consistent visual language. This agent encodes that context into every generation step.
+This agent solves three problems:
+1. **Generic output:** Structured moodboard + personality keywords + rich visual knowledge base force intentional, non-templated generation
+2. **Limited creative range:** Agent continuously learns from high-quality design sources (Pinterest, Behance, agency portfolios) — like a junior designer enriching their visual library over time
+3. **Production bottleneck:** Once a direction is chosen, all assets auto-build, vectorize, and upload to Figma
 
 ---
 
 ## Input
 
-The agent accepts one of two starting points and auto-detects which:
+### 1. Project Brief
+Auto-detected, either:
+- **Logo file** (AI + PNG) — agent extracts colors, style, form language
+- **spec.md** — brand name, product description, target audience, tone of voice
 
-| Input Type | What to Provide |
-|---|---|
-| Logo file | Upload logo (AI + PNG) — agent extracts colors, style, form language |
-| spec.md | Project spec with brand name, product description, target audience, tone |
+### 2. Structured Moodboard
+Images organized into labeled folders — required for accurate interpretation:
 
-**Required for both:**
+```
+/moodboard
+  /logo-style       ← logo form, shape language, construction style
+  /graphic-style    ← illustration style, graphic elements, visual texture
+  /typography       ← typeface references, lettering style
+  /color-mood       ← color palette, atmosphere, emotional tone
+```
+10–15+ images total. Labels are required — AI cannot reliably self-identify reference categories from unlabeled image dumps.
 
-### 1. Moodboard (10–15+ images)
+### 3. Brand Personality Keywords
+Specific sensory and emotional descriptions — not generic adjectives:
+- ❌ "Modern, clean, bold"
+- ✅ "The feeling of opening a precision hardware device — weighty, satisfying, inevitable."
+- ✅ "Controlled aggression — a boxer before a fight, not during. Tension without chaos."
 
-- Visual references that capture the desired feeling of the brand
-- Can be from any source: Dribbble, Pinterest, competitor brands, art, photography
-- The more specific and curated, the better the output
+Minimum 5 keywords, each with 2–3 sentence explanation.
 
-### 2. Brand Personality Keywords + Explanations
+### 4. Logo Symbol Direction
+- Designer specifies what symbol/icon the logo should contain, OR
+- Leave open → agent researches and proposes suitable symbols based on brand context
 
-Not generic adjectives ("modern", "clean", "professional")
-
-Specific sensory and emotional descriptions — how should the brand feel?
-
-**Examples:**
-
-❌ "Bold and innovative"
-
-✅ "The feeling of opening a new hardware device — precise, weighty, satisfying. Like a Bloomberg terminal but designed by someone who loves cinema."
-
-✅ "Controlled aggression — a boxer before a fight, not during. Tension without chaos."
-
-Minimum 5 keywords, each with a 2–3 sentence explanation
+### 5. Mockup Library
+A labeled collection of product mockups used to assemble stylescapes:
+```
+/mockups
+  /social-media     ← phone screens, X/Twitter post mockups
+  /print            ← business cards, letterhead, packaging
+  /digital          ← laptop, tablet, dashboard UI frames
+  /apparel          ← t-shirts, caps, merchandise
+  /signage          ← outdoor, environmental
+```
+Quality mockups are critical for stylescapes that look professional, not AI-generated. This library is maintained and expanded over time.
 
 ---
 
-## What the Agent Generates
+## Agent Visual Knowledge Base
 
-### Phase 1 — Visual Identity System
+A core quality differentiator. The agent continuously learns from high-quality design sources — like a junior designer enriching their visual library:
 
-- **Color palette:** Primary, secondary, neutral + usage rules. 4 options with different mood directions
-- **Typography:** Font pairing recommendations (headline + body) matching brand personality
-- **Brand patterns / graphic elements:** Textures, shapes, motifs that extend the visual language beyond the logo — delivered as vector files (Illustrator)
-- **Logo refinement (if input is spec.md):** Agent proposes logo concepts based on moodboard + keywords. If input is existing logo: agent extracts and documents the visual DNA
+**Automated learning pipeline:**
+```
+Agent periodically crawls:
+  → Pinterest boards (curated design, branding, typography)
+  → Behance (top brand identity projects, filtered by quality signals)
+  → Design agency portfolios (Pentagram, Collins, DesignStudio, etc.)
+  → Industry-specific visual references per product category
 
-### Phase 2 — Social Media Template System (X / Twitter)
+→ Extracted visuals tagged by: style, industry, color system, era, mood
+→ Stored in visual knowledge base
+→ Used to inform Option 1 (market research) and Option 4 (Wild)
+```
 
-5 core post templates, each with 4 layout options:
+This transforms the agent from "generating from prompt" to "generating from a deep, curated understanding of what great design looks like" — the same advantage a senior designer has over a junior one.
+
+---
+
+## 4 Brand Identity Options
+
+Each spec produces **4 distinct identity directions** — genuinely different strategic and creative positions:
+
+### Option 1 — Market-Aligned
+Agent researches similar products and competitors → analyzes current design trends for this product category → synthesizes a direction that fits market expectations, done well.
+
+*"What the market currently expects from a brand like this."*
+
+### Option 2 — Designer-Led
+Built entirely from the designer's moodboard. Agent maps structured references to design decisions — color, typography, graphic style, logo form.
+
+*"What the designer sees when they imagine this brand."*
+
+### Option 3 — Hybrid
+A reasoned balance between market research and designer instinct. Agent proposes which elements should follow market norms (trust, recognition) and which should differentiate (memorability, personality). Includes a brief rationale for each decision.
+
+*"Where to conform, where to stand out — and why."*
+
+### Option 4 — Wild Card
+Fully agent-driven. No moodboard constraint, no market following. Agent draws from its visual knowledge base and its own understanding of the product to propose a direction no one asked for — but might be exactly right.
+
+*"What the agent would do if given complete creative freedom."*
+
+---
+
+## Output Structure
+
+### Phase 1 — Stylescape Presentation (4 Directions)
+
+Each of the 4 directions is presented as a **stylescape** — not a slide deck, but a visual composition that shows the full feeling of the brand direction at a glance:
+
+**Each stylescape contains:**
+- Logo concept / symbol direction
+- Color palette applied in context
+- Typography in use (headlines, body, labels)
+- Graphic elements / patterns
+- Brand applied to mockups from the mockup library:
+  - X banner mockup
+  - Social post example
+  - Product / merchandise mockup (if relevant)
+- Direction name + 2–3 sentence strategic rationale
+
+**Format:** High-resolution image (PNG) — like the NuRange / Behance examples — assembled in Illustrator, exported flat. Ready to share with stakeholders for direction sign-off.
+
+---
+
+### Phase 2 — Full Asset Build (After Direction is Chosen)
+
+Once one direction is selected:
+
+**Brand Foundation Files**
+- Logo: all sizes and versions (primary, secondary, icon, dark/light variants)
+- Color system: HEX, RGB, CMYK + usage rules
+- Typography: font files + usage hierarchy
+- Graphic elements / patterns: vector files
+
+**Image → Vector Conversion**
+- Gemini generates raster (PNG) → Illustrator auto-traces → exports AI + SVG
+- All brand assets production-ready for print, web, large format
+
+**Social Media Template System (X / Twitter)**
+Built in Illustrator with chosen brand system pre-applied:
 
 | Template | Purpose |
-|---|---|
-| Announcement | New feature, product launch, major news |
-| Collab / Partnership | Co-branding posts with partner brands |
-| Advertising | Promotional posts, offers, CTAs |
-| Feature Introduction | Explain a product feature or concept |
-| Information-heavy | Data, stats, comparison tables (e.g. Moonsheet style) |
+|----------|---------|
+| Announcement | Launch, major news |
+| Collab / Partnership | Co-branding posts |
+| Advertising | Promotional, CTAs |
+| Feature Introduction | Product features |
+| Information-heavy | Data, stats, tables |
 
-All templates: vector-based in Illustrator, copy-swappable via Variables or JSX script
+Each template: 4 layout options, vector, copy-swappable via Illustrator Variables
 
-### Phase 3 — Figma Component Library (auto-upload)
-
-- All brand elements converted to Figma components
-- Color styles, text styles, logo components, template frames
-- Team can immediately use components to build new assets without starting from scratch
-- Agent auto-uploads to Figma via Figma API
-
-### Phase 4 — Landing Page Design Proposal (bonus if time allows)
-
-- Agent proposes a landing page layout concept consistent with the brand identity
-- Delivered as: Figma frame or HTML mockup
-- Shows how the brand system extends from social → web
-
----
-
-## How the 4 Options Differ
-
-For every output, the agent generates 4 meaningfully different directions:
-
-| Option | What's Different |
-|---|---|
-| Option 1 | Closest to moodboard references — safe, on-brief |
-| Option 2 | Color mood shifted — same structure, different emotional temperature |
-| Option 3 | Layout/composition approach — different visual hierarchy |
-| Option 4 | Unexpected direction — agent takes creative risk, pushes brand personality further |
-
-Designer reviews and selects direction. Selected direction becomes the master for all subsequent outputs.
+**Figma Auto-Upload**
+- All assets uploaded via Figma API
+- Color styles, text styles, logo components, template frames created automatically
+- Team builds immediately from the component system
 
 ---
 
 ## Workflow
 
 ```
-Input (logo OR spec.md) + Moodboard + Brand Keywords
-→ Claude analyzes: extracts visual DNA from moodboard, maps keywords to design decisions
-→ Claude generates design brief: color direction, typography rationale, style language
-→ Gemini generates visual assets per direction (4 options each phase)
-→ Illustrator: assembles final vector files — patterns, templates, export
-→ Figma API: auto-uploads components, color styles, text styles
-→ Designer reviews → selects direction → agent refines remaining outputs
-→ New assets → saved to brand library
+Input: brief + moodboard + keywords + symbol direction + mockup library
+  │
+  ├─ Option 1: web search → market/competitor research → trend synthesis
+  ├─ Option 2: moodboard analysis → design decisions mapped
+  ├─ Option 3: market + moodboard → reasoned balance with rationale
+  └─ Option 4: visual knowledge base + product understanding → free direction
+  │
+  ↓
+Gemini generates visual assets for all 4 directions
+  │
+  ↓
+Illustrator: assembles 4 stylescapes using mockup library
+  │
+  ↓
+Phase 1 Output: 4 stylescape images → stakeholder selects direction
+  │
+  ↓ [Direction selected]
+  │
+Gemini generates full asset set for chosen direction
+Illustrator: raster → vector, social template system
+Figma API: auto-upload complete brand library
+  │
+  ↓
+Phase 2 Output: Complete brand kit + Figma library
+New assets → saved to brand library + visual knowledge base
 ```
 
 ---
@@ -122,60 +200,44 @@ Input (logo OR spec.md) + Moodboard + Brand Keywords
 ## Tool Stack
 
 | Tool | Role |
-|---|---|
-| Claude | Moodboard analysis, keyword interpretation, design brief generation, prompt engineering, workflow orchestration |
-| Gemini API (paid) | Visual asset generation — no watermark |
-| Illustrator + JSX | Vector assembly, template system, brand patterns, batch export |
-| Figma API | Auto-upload components, styles, templates to Figma |
-| Claude web search | Research brand space, competitor visual landscape, trend context |
+|------|------|
+| **Claude** | Market research, moodboard analysis, keyword interpretation, design brief, prompt engineering, workflow orchestration |
+| **Gemini API (paid)** | Visual generation — no watermark |
+| **Illustrator + JSX** | Stylescape assembly, image→vector, template system, batch export |
+| **Figma API** | Auto-upload brand components, styles, templates |
+| **Claude web search + Firecrawl** | Market research (Option 1) + visual knowledge base crawling (Behance, Pinterest, agency sites) |
 
 ---
 
 ## MVP Scope (4 Days)
 
-**Priority 1 — Core identity + social templates**
-
-- Input handling: logo file OR spec.md + moodboard + keywords
-- Claude moodboard analysis + design brief generation
-- Color palette generation (4 directions)
-- Typography recommendations
-- X post templates: 3 of 5 types (Announcement, Collab, Feature)
-- Illustrator vector export
+**Priority 1**
+- Input handling: brief + structured moodboard + keywords + mockup library
+- All 4 identity directions generated
+- Phase 1: 4 stylescapes assembled in Illustrator
+- Phase 2: full asset build for selected direction
+- Image → vector via Illustrator
 
 **Priority 2 — if time allows**
+- Visual knowledge base crawling pipeline
+- Social template system (3 of 5 types)
+- Figma API auto-upload
 
-- Remaining 2 templates (Advertising, Information-heavy)
-- Brand pattern / graphic element system
-- Figma auto-upload via API
-
-**Out of scope (roadmap):**
-
-- Landing page proposal
+**Out of scope (roadmap)**
 - Full Figma component library automation
+- Landing page generation
 - Real-time trend monitoring
 
 ---
 
 ## Why This Agent Matters
 
-- **Non-generic output:** Moodboard + detailed personality keywords force the AI to generate brand-specific assets, not templates
-- **Speed:** Full brand kit in hours, not weeks
-- **Figma-ready:** Team can immediately build with the system — no manual handoff
-- **Scalable:** Same pipeline works for any new project — input changes, system stays
+- **Non-generic:** Structured moodboard + rich visual knowledge base → intentional, brand-specific output
+- **4 real directions:** Market, designer, hybrid, wild — genuine creative options, not variations
+- **Stylescape format:** Stakeholders see the full brand feeling instantly, not abstract color swatches
+- **Self-improving:** Visual knowledge base grows over time → output quality improves continuously
+- **Zero handoff:** Chosen direction → Figma library automatically
 
 ---
 
-## Roadmap
-
-**Phase 2 — Real-Time Trend Monitor**
-Monitor top crypto/design accounts on X → detect visual trends as they emerge → alert team and generate trend-aligned assets before the moment passes.
-
-**Phase 3 — Further Expansion**
-
-- Full landing page generation from brand kit
-- Brand kit → UI design system automation
-- Multi-platform export (LinkedIn, Instagram, TikTok formats)
-
----
-
-*Spec v1.0 (New Direction) — Day 1 | Ready for Supervisor review*
+*Spec v1.0 — Day 1 | Ready for Supervisor review*
