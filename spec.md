@@ -21,7 +21,7 @@ This agent solves three problems:
 ## Input
 
 ### 1. Project Brief
-Auto-detected, either:
+Auto-detected, either or both:
 - **Logo file** (AI + PNG) — agent extracts colors, style, form language
 - **spec.md** — brand name, product description, target audience, tone of voice
 
