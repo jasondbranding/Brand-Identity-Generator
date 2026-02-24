@@ -18,6 +18,7 @@ import base64
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -37,6 +38,7 @@ console = Console()
 
 METADATA_PATH = Path("mockups/metadata.json")
 PROCESSED_DIR = Path("mockups/processed")
+ORIGINALS_DIR = Path("mockups/originals")
 IMAGE_EXTS    = {".png", ".jpg", ".jpeg", ".webp"}
 
 MAGENTA   = (255,   0, 255)
@@ -45,9 +47,132 @@ YELLOW    = (255, 255,   0)
 TOLERANCE = 30
 MIN_PX    = 50
 
+# ── Retry config ───────────────────────────────────────────────────────────────
+MAX_ATTEMPTS   = 3     # total attempts per mockup (across all prompt levels)
+BACKOFF_BASE   = 30.0  # seconds to wait on first rate-limit hit (doubles each time)
+RETRY_WAIT     = 5.0   # seconds to wait on non-rate-limit errors
+
+
+class _RateLimitError(Exception):
+    """Re-raised from _ai_reconstruct_mockup when Gemini returns 429 / RESOURCE_EXHAUSTED."""
+
 Handler = Callable[
     [Image.Image, Image.Image, "DirectionAssets", np.ndarray], str
 ]
+
+
+# ── Original-finder ────────────────────────────────────────────────────────────
+
+def _find_original(processed_path: Path, originals_dir: Path = ORIGINALS_DIR) -> Optional[Path]:
+    """
+    Find the high-quality original image that corresponds to a processed mockup.
+
+    Naming convention: processed files end with _processed (before extension),
+    originals end with _original.
+
+    Examples:
+      wall_logo_processed.png     → originals/wall_logo_original.png
+      tote_bag_processed.jpg      → originals/tote_bag_original.png
+      app_Icon_phone_flat_processed.png → originals/app_Icon_phone_flat_original.png
+    """
+    if not originals_dir.exists():
+        return None
+
+    # Strip _processed suffix from stem
+    stem = processed_path.stem
+    if stem.endswith("_processed"):
+        base = stem[: -len("_processed")]
+    else:
+        base = stem
+
+    # Try {base}_original with any supported extension
+    for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        candidate = originals_dir / f"{base}_original{ext}"
+        if candidate.exists():
+            return candidate
+
+    # Fallback: try exact base name with any extension (no _original suffix)
+    for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        candidate = originals_dir / f"{base}{ext}"
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+# ── Zone extraction from processed images ────────────────────────────────────
+#
+# Processed images are NEVER sent to Gemini as visual input.
+# They are read locally by Pillow to extract zone bounding-box coordinates,
+# which are then described to Gemini as plain text.  The AI only ever "sees"
+# the original high-quality photo and the brand logo.
+
+def _extract_zones(processed_path: Path) -> dict:
+    """
+    Programmatically extract zone bounding boxes from a processed guide image.
+
+    Detects the three placeholder colours (magenta/yellow/cyan) using pixel
+    masks and returns a dict of { zone_name → {bbox, img_size, pixel_count} }.
+
+    The processed image is opened by Pillow only — it is NEVER forwarded to
+    any AI model.
+    """
+    try:
+        img = Image.open(processed_path).convert("RGBA")
+        arr = np.array(img)
+        w, h = img.size
+        zones: dict = {}
+
+        for name, color in [("logo", MAGENTA), ("surface", YELLOW), ("text", CYAN)]:
+            mask = _make_mask(arr, color)
+            if mask.sum() < MIN_PX:
+                continue
+            bbox = _mask_bbox(mask)
+            if bbox:
+                zones[name] = {
+                    "bbox":        bbox,           # (x1, y1, x2, y2) in px
+                    "img_size":    (w, h),
+                    "pixel_count": int(mask.sum()),
+                }
+        return zones
+    except Exception as exc:
+        console.print(f"    [dim]Zone extraction failed: {exc}[/dim]")
+        return {}
+
+
+def _zones_to_text(zones: dict) -> str:
+    """
+    Convert extracted zone bboxes into a natural-language coordinate description
+    for inclusion in the AI prompt.
+
+    Example output:
+      PLACEMENT ZONES (pixel coordinates):
+      • LOGO zone  : top-left (412, 180) → bottom-right (860, 620),
+                     center (636, 400), size 448×440 px (44%W × 55%H)
+      • SURFACE zone: ...
+    """
+    if not zones:
+        return ""
+
+    label_map = {
+        "logo":    "LOGO zone",
+        "surface": "SURFACE / COLOR zone",
+        "text":    "TEXT / BRAND NAME zone",
+    }
+    lines = ["PLACEMENT ZONES (pixel coordinates in the original photo):"]
+    for name, info in zones.items():
+        x1, y1, x2, y2 = info["bbox"]
+        w, h = info["img_size"]
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        bw, bh = x2 - x1, y2 - y1
+        pct_w  = round(bw / w * 100)
+        pct_h  = round(bh / h * 100)
+        label  = label_map.get(name, f"{name.upper()} zone")
+        lines.append(
+            f"  • {label}: top-left ({x1},{y1}) → bottom-right ({x2},{y2}), "
+            f"center ({cx},{cy}), size {bw}×{bh}px ({pct_w}%W × {pct_h}%H)"
+        )
+    return "\n".join(lines)
 
 
 # ── Basic colour helpers ───────────────────────────────────────────────────────
@@ -362,7 +487,12 @@ def _handle_wall_logo(
     wall_logo_processed.png
     Magenta parallelogram → surrounding wall colour fill + white logo + drop shadow.
     The parallelogram shape is preserved via pixel mask clipping.
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
     """
+    # Sample surrounding colour from the original photo, not the processed zones
+    canvas_arr = np.array(canvas)
+
     mask = _make_mask(arr, MAGENTA)
     if mask.sum() < MIN_PX:
         return "no zones"
@@ -371,8 +501,8 @@ def _handle_wall_logo(
         return "no zones"
     x1, y1, x2, y2 = bbox
 
-    # Fill parallelogram with surrounding wall colour
-    wall = _sample_surrounding(arr, mask)
+    # Fill parallelogram with surrounding wall colour from original photo
+    wall = _sample_surrounding(canvas_arr, mask)
     _fill_mask(canvas, mask, wall)
 
     if not (assets.logo and assets.logo.exists() and assets.logo.stat().st_size > 100):
@@ -409,11 +539,16 @@ def _handle_app_icon(
     app_Icon_phone_flat_processed.png
     Magenta → primary colour bg + rounded corners + white logo (iOS icon style).
     Cyan    → black bg + small white brand label.
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
     """
     direction = assets.direction
     primary   = _hex_to_rgb(direction.colors[0].hex)
     brand     = direction.direction_name.upper()
     zones: List[str] = []
+
+    # Array from original canvas for accurate surrounding-colour sampling
+    canvas_arr = np.array(canvas)
 
     # ── LOGO (icon) ───────────────────────────────────────────────────────────
     logo_mask = _make_mask(arr, MAGENTA)
@@ -432,10 +567,9 @@ def _handle_app_icon(
                 ly = (h - logo.height) // 2
                 patch.paste(logo, (lx, ly), logo)
             patch = _rounded_icon(patch, 0.22)
-            # Step 1: ERASE all magenta pixels with surrounding colour.
-            # Restoring `original` here would re-introduce magenta at the
-            # transparent corners of the rounded patch — wrong.
-            sur = _sample_surrounding(arr, logo_mask)
+            # Step 1: ERASE all magenta pixels with surrounding phone-screen colour.
+            # Sample from the original photo so corners match the real screen background.
+            sur = _sample_surrounding(canvas_arr, logo_mask)
             _fill_mask(canvas, logo_mask, sur)
             # Step 2: Paste rounded patch — transparent corners now show the
             # clean surrounding phone-screen colour, not magenta.
@@ -469,7 +603,12 @@ def _handle_black_shirt(
     """
     black_shirt_logo_processed.png
     Magenta → black fill + small white logo at 90% opacity + fabric multiply blend.
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
     """
+    # Snapshot of the unmodified original photo — used for authentic fabric texture blend
+    canvas_pristine = canvas.copy()
+
     mask = _make_mask(arr, MAGENTA)
     if mask.sum() < MIN_PX:
         return "no zones"
@@ -489,7 +628,8 @@ def _handle_black_shirt(
     logo = _fit(logo, x2 - x1, y2 - y1, 0.45)
     logo = _opacity(logo, 0.90)
     _paste_bbox_center(canvas, logo, x1, y1, x2, y2)
-    _fabric_blend(canvas, original, mask, op=0.18)
+    # Blend original photo texture (not processed flat-color) through the logo
+    _fabric_blend(canvas, canvas_pristine, mask, op=0.18)
     return "LOGO"
 
 
@@ -700,7 +840,14 @@ def _handle_tote_bag(
     """
     tote_bag_processed.jpg
     Magenta → dark fill + large white logo at 88% opacity + fabric multiply blend.
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
     """
+    # Snapshot of the unmodified original photo for authentic fabric texture blend
+    canvas_pristine = canvas.copy()
+    # Array from original canvas for accurate surrounding-colour sampling
+    canvas_arr = np.array(canvas_pristine)
+
     mask = _make_mask(arr, MAGENTA)
     if mask.sum() < MIN_PX:
         return "no zones"
@@ -709,8 +856,8 @@ def _handle_tote_bag(
         return "no zones"
     x1, y1, x2, y2 = bbox
 
-    # Sample surrounding canvas colour (the bag material)
-    bag_color = _sample_surrounding(arr, mask)
+    # Sample bag material colour from the original photo (not the flat processed zones)
+    bag_color = _sample_surrounding(canvas_arr, mask)
     _fill_mask(canvas, mask, bag_color)
 
     if not (assets.logo and assets.logo.exists() and assets.logo.stat().st_size > 100):
@@ -724,7 +871,8 @@ def _handle_tote_bag(
     logo = _fit(logo, x2 - x1, y2 - y1, 0.75)
     logo = _opacity(logo, 0.88)
     _paste_bbox_center(canvas, logo, x1, y1, x2, y2)
-    _fabric_blend(canvas, original, mask, op=0.20)
+    # Blend original photo texture (not processed flat-color) through the logo
+    _fabric_blend(canvas, canvas_pristine, mask, op=0.20)
     return "LOGO"
 
 
@@ -738,7 +886,12 @@ def _handle_tshirt(
     tshirt_processed.png
     Magenta → black fill + medium white logo, positioned slightly up-centre,
     at 88% opacity + fabric multiply blend (cotton texture).
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
     """
+    # Snapshot of the unmodified original photo for authentic cotton texture blend
+    canvas_pristine = canvas.copy()
+
     mask = _make_mask(arr, MAGENTA)
     if mask.sum() < MIN_PX:
         return "no zones"
@@ -761,7 +914,8 @@ def _handle_tshirt(
     cx = (x1 + x2) // 2
     cy = (y1 + y2) // 2 - logo.height // 6
     _paste_center(canvas, logo, cx, cy)
-    _fabric_blend(canvas, original, mask, op=0.18)
+    # Blend original photo texture (not processed flat-color) through the logo
+    _fabric_blend(canvas, canvas_pristine, mask, op=0.18)
     return "LOGO"
 
 
@@ -776,11 +930,16 @@ def _handle_x_account(
     Yellow  → background.png or pattern.png cover-fill (banner zone).
     Magenta → light grey bg + black logo, rounded avatar style.
     Cyan    → white fill + black bold brand name.
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
     """
     direction = assets.direction
     primary   = _hex_to_rgb(direction.colors[0].hex)
     brand     = direction.direction_name.upper()
     zones: List[str] = []
+
+    # Array from original canvas for accurate surrounding-colour sampling
+    canvas_arr = np.array(canvas)
 
     # ── SURFACE (profile banner) → background or pattern, not solid colour ────
     surf_mask = _make_mask(arr, YELLOW)
@@ -816,10 +975,9 @@ def _handle_x_account(
                 ly = (h - logo.height) // 2
                 patch.paste(logo, (lx, ly), logo)
             patch = _rounded_icon(patch, 0.22)
-            # Step 1: ERASE all magenta pixels with surrounding colour.
-            # Restoring `original` would re-introduce magenta at the transparent
-            # corners of the rounded avatar patch — wrong.
-            sur = _sample_surrounding(arr, logo_mask)
+            # Step 1: ERASE all magenta pixels with surrounding page-bg colour.
+            # Sample from original photo so corners match the real page background.
+            sur = _sample_surrounding(canvas_arr, logo_mask)
             _fill_mask(canvas, logo_mask, sur)
             # Step 2: Paste rounded avatar patch — corners show page bg, not magenta.
             canvas.paste(patch, (x1, y1), patch)
@@ -847,11 +1005,17 @@ def _handle_generic(
     assets: DirectionAssets,
     arr: np.ndarray,
 ) -> str:
-    """Fill all 3 placeholder colours using surrounding colour + logo + text."""
+    """Fill all 3 placeholder colours using surrounding colour + logo + text.
+    canvas  = high-quality original photo (modified in-place)
+    original = zone_ref/processed (zone detection only — arr already extracted)
+    """
     direction = assets.direction
     primary   = _hex_to_rgb(direction.colors[0].hex)
     brand     = direction.direction_name.upper()
     zones: List[str] = []
+
+    # Array from original canvas for accurate surrounding-colour sampling
+    canvas_arr = np.array(canvas)
 
     surf_mask = _make_mask(arr, YELLOW)
     if surf_mask.sum() >= MIN_PX:
@@ -863,7 +1027,7 @@ def _handle_generic(
         bbox = _mask_bbox(logo_mask)
         if bbox:
             x1, y1, x2, y2 = bbox
-            sur = _sample_surrounding(arr, logo_mask)
+            sur = _sample_surrounding(canvas_arr, logo_mask)
             _fill_mask(canvas, logo_mask, sur)
             if assets.logo and assets.logo.exists() and assets.logo.stat().st_size > 100:
                 logo = Image.open(assets.logo).convert("RGBA")
@@ -878,7 +1042,7 @@ def _handle_generic(
         bbox = _mask_bbox(text_mask)
         if bbox:
             x1, y1, x2, y2 = bbox
-            sur = _sample_surrounding(arr, text_mask)
+            sur = _sample_surrounding(canvas_arr, text_mask)
             _fill_mask(canvas, text_mask, sur)
             draw = ImageDraw.Draw(canvas)
             _draw_text_auto(draw, brand, x1, y1, x2, y2, fill=_contrasting(sur))
@@ -1040,117 +1204,162 @@ def build_mockup_prompt(
     mockup_key: str,
     assets: "DirectionAssets",
     brand_name: str,
+    zone_text: str = "",
 ) -> str:
     """
-    Build a structured natural-language prompt for Gemini AI mockup reconstruction.
+    Build the full art-direction prompt for Gemini mockup reconstruction.
 
-    Combines per-mockup scene specs (from MOCKUP_PROMPTS) with live brand data
-    (colors, direction name) to guide the model's output.
+    Zone coordinates (extracted from the processed image by Pillow) are embedded
+    as plain text so Gemini knows exactly where to place each brand asset without
+    ever seeing the processed/placeholder image.
+
+    Args:
+        mockup_key: Key into MOCKUP_PROMPTS for scene-specific art direction.
+        assets:     DirectionAssets for this brand direction.
+        brand_name: Brand name string.
+        zone_text:  Output of _zones_to_text() — pixel coordinates of each zone.
     """
-    direction = assets.direction
-    spec = MOCKUP_PROMPTS.get(mockup_key, {})
-
-    # Brand color summary
+    direction   = assets.direction
+    spec        = MOCKUP_PROMPTS.get(mockup_key, {})
     primary_hex = direction.colors[0].hex if direction.colors else "#333333"
     colors_desc = ", ".join(c.hex for c in direction.colors[:3]) if direction.colors else primary_hex
 
     system_context = (
-        "You are a professional brand identity mockup renderer.\n"
-        "Your task: take a reference mockup image that has colored placeholder zones "
-        "and reconstruct it with a real brand identity applied.\n\n"
-        "Placeholder color legend:\n"
-        "  • Magenta/pink (#FF00FF) = logo placement zone\n"
-        "  • Yellow (#FFFF00)       = brand color surface / imagery zone\n"
-        "  • Cyan (#00FFFF)         = brand name / text zone\n\n"
-        "Rules:\n"
-        "  - Replace ALL placeholder zones with the brand identity shown.\n"
-        "  - Keep all non-placeholder areas IDENTICAL: surroundings, shadows, materials, "
-        "lighting, perspective, and scene composition must not change.\n"
-        "  - Output a single photorealistic image with the same dimensions and crop as the reference.\n"
-        "  - No additional text or words except in designated cyan text zones.\n\n"
+        "You are a professional brand identity designer and mockup renderer.\n"
+        "Your task: given a high-quality mockup photo and a brand logo, "
+        "integrate the brand identity into the photo at the specified zones.\n\n"
+        "Rendering rules:\n"
+        "  - Work from the original photo — do NOT invent new backgrounds or scenes.\n"
+        "  - Replace ONLY the designated placement zones with brand assets.\n"
+        "  - Keep ALL non-zone areas pixel-perfect: lighting, shadows, materials, "
+        "perspective, and scene composition must be identical to the original.\n"
+        "  - Render brand assets as natural parts of the material "
+        "(dimensional signage on walls, screen-print on fabric, digital on screens, etc.).\n"
+        "  - Output a single photorealistic image. No text, captions, or watermarks.\n\n"
     )
 
     brand_brief = (
-        f"Brand name: {brand_name}\n"
-        f"Primary color: {primary_hex}\n"
-        f"Color palette: {colors_desc}\n"
-        f"Brand mood / direction: {direction.direction_name}\n\n"
+        f"BRAND IDENTITY:\n"
+        f"  Brand name    : {brand_name}\n"
+        f"  Primary color : {primary_hex}\n"
+        f"  Color palette : {colors_desc}\n"
+        f"  Direction mood: {direction.direction_name}\n\n"
     )
+
+    zone_section = ""
+    if zone_text:
+        zone_section = zone_text + "\n\n"
 
     mockup_spec = ""
     if spec:
         mockup_spec = (
-            f"Mockup scene: {spec.get('scene', '')}\n"
-            f"Logo placement: {spec.get('logo_placement', 'centered in the placeholder zone')}\n"
-            f"Logo color: {spec.get('logo_color', 'contrasting with background')}\n"
-            f"Logo size: {spec.get('logo_size', '60% of the zone')}\n"
-            f"Material / rendering: {spec.get('material', 'standard print')}\n"
-            f"Visual style: {spec.get('style', 'professional, clean')}\n\n"
+            f"MOCKUP SCENE & ART DIRECTION:\n"
+            f"  Scene        : {spec.get('scene', '')}\n"
+            f"  Logo placement: {spec.get('logo_placement', 'centered in the logo zone')}\n"
+            f"  Logo color   : {spec.get('logo_color', 'contrasting with background')}\n"
+            f"  Logo size    : {spec.get('logo_size', '60% of the zone')}\n"
+            f"  Material     : {spec.get('material', 'standard print')}\n"
+            f"  Visual style : {spec.get('style', 'professional, clean')}\n\n"
         )
 
     instructions = (
-        "Step-by-step instructions:\n"
-        "1. Analyse the reference mockup image (first image) — identify all placeholder zones.\n"
-        "2. Apply the brand primary color to all YELLOW zones.\n"
-        "3. Place the logo (second image) in all MAGENTA zones — render it naturally on the "
-        "material (screen-print texture on fabric, etched look on acrylic, etc.).\n"
-        "4. Render the brand name text in all CYAN zones with appropriate typography.\n"
-        "5. Output the final photorealistic mockup image."
+        "STEP-BY-STEP INSTRUCTIONS:\n"
+        "1. Study the original photo (provided after this prompt).\n"
+        "2. Locate each placement zone using the pixel coordinates above.\n"
+        "3. LOGO zone: integrate the brand logo mark (provided after the photo) "
+        "at the specified coordinates — render it naturally on the material.\n"
+        "4. SURFACE / COLOR zone: apply brand primary color or brand imagery.\n"
+        "5. TEXT zone: render the brand name in clean, high-contrast typography.\n"
+        "6. Output the final photorealistic mockup. Identical to the original "
+        "except at the designated zones."
     )
 
-    return system_context + brand_brief + mockup_spec + instructions
+    return system_context + brand_brief + zone_section + mockup_spec + instructions
 
 
 def _ai_reconstruct_mockup(
-    mockup_path: Path,
+    original_path: Optional[Path],
     prompt: str,
     logo_path: Optional[Path],
     api_key: str,
+    zones: Optional[dict] = None,
 ) -> Optional[bytes]:
     """
-    Use Gemini multi-modal image generation to reconstruct a mockup with brand identity.
+    Reconstruct a brand mockup using Gemini image generation.
 
-    Content sent to Gemini:
-      [text: system + brand brief + instructions]
-      [image: reference mockup with placeholder zones]
-      [text: logo introduction]
-      [image: brand logo (transparent version preferred)]
-      [text: closing instruction]
+    Visual inputs sent to Gemini (in order):
+      1. Original high-quality mockup photo  ← PRIMARY visual base
+      2. Brand logo mark                     ← asset to integrate
+
+    The processed / zone-guide image is NEVER sent to Gemini.
+    Zone positions are extracted by Pillow locally and forwarded as plain-text
+    pixel coordinates inside the prompt, so the AI understands placement without
+    being visually influenced by the flat colored placeholder image.
+
+    Args:
+        original_path: Path to the high-quality original mockup photo.
+        prompt:        Art-direction prompt including zone coordinates.
+        logo_path:     Path to the brand logo (transparent PNG preferred).
+        api_key:       Gemini API key.
+        zones:         Pre-extracted zone dict from _extract_zones() — already
+                       embedded in prompt, kept here for logging only.
 
     Returns raw image bytes on success, None on any failure.
     """
+    if not original_path or not original_path.exists():
+        console.print("    [dim]AI skip — no original photo found[/dim]")
+        return None
+
     try:
-        client = genai.Client(api_key=api_key)
-
-        # Read mockup
-        mockup_bytes = mockup_path.read_bytes()
+        client   = genai.Client(api_key=api_key)
         mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                    ".png": "image/png", ".webp": "image/webp"}
-        mockup_mime = mime_map.get(mockup_path.suffix.lower(), "image/png")
+                    ".png": "image/png",  ".webp": "image/webp"}
 
-        # Build content parts
-        parts = [
-            genai_types.Part.from_text(text=prompt),
-            genai_types.Part.from_bytes(data=mockup_bytes, mime_type=mockup_mime),
-        ]
+        original_bytes = original_path.read_bytes()
+        original_mime  = mime_map.get(original_path.suffix.lower(), "image/png")
 
-        # Add logo
+        # ── Content assembly ──────────────────────────────────────────────────
+        # Order matters: text context → original photo → logo → closing directive
+        parts: list = []
+
+        # 1. Full art-direction prompt (includes zone coordinates as text)
+        parts.append(genai_types.Part.from_text(text=prompt))
+
+        # 2. Original high-quality photo — the only visual base
+        parts.append(genai_types.Part.from_text(
+            text=(
+                "ORIGINAL MOCKUP PHOTO — this is your canvas. "
+                "Reconstruct this exact scene with the brand identity integrated. "
+                "Preserve all lighting, shadows, perspective, materials, and surroundings."
+            )
+        ))
+        parts.append(genai_types.Part.from_bytes(
+            data=original_bytes, mime_type=original_mime
+        ))
+
+        # 3. Brand logo — to be integrated into the logo zone
         if logo_path and logo_path.exists() and logo_path.stat().st_size > 100:
             logo_bytes = logo_path.read_bytes()
             parts.append(genai_types.Part.from_text(
                 text=(
-                    "Brand logo mark (integrate this into all magenta zones, "
-                    "render naturally on the material):"
+                    "BRAND LOGO — integrate this mark into the LOGO zone described above. "
+                    "Render it as a natural part of the material "
+                    "(e.g. screen-print on fabric, dimensional letters on a wall, "
+                    "etched into acrylic, flat digital on a screen, etc.). "
+                    "Remove any white background from this logo."
                 )
             ))
             parts.append(genai_types.Part.from_bytes(
                 data=logo_bytes, mime_type="image/png"
             ))
 
+        # 4. Final directive
         parts.append(genai_types.Part.from_text(
             text=(
-                "Output the reconstructed mockup image with brand identity fully applied. "
-                "Image only — no captions."
+                "Now output the final reconstructed mockup image. "
+                "Use the original photo as the base — only modify the placement zones. "
+                "The result must be photorealistic, seamless, and production-ready. "
+                "Output image only, no captions or explanations."
             )
         ))
 
@@ -1171,7 +1380,130 @@ def _ai_reconstruct_mockup(
                     return data
 
     except Exception as e:
+        err = str(e)
+        # Rate-limit / quota errors need backoff — re-raise so the retry wrapper can wait
+        if any(k in err for k in ("429", "RESOURCE_EXHAUSTED", "quota", "rateLimitExceeded")):
+            raise _RateLimitError(err) from e
+        # All other errors: log and return None (retry wrapper decides what to do next)
         console.print(f"    [dim]AI reconstruction failed: {e}[/dim]")
+
+    return None
+
+
+# ── Retry helpers ─────────────────────────────────────────────────────────────
+
+def _build_fallback_prompts(full_prompt: str, zones: Optional[dict]) -> List[str]:
+    """
+    Return a list of 3 progressively simpler prompts for the retry ladder.
+
+    Level 1 — full art-direction prompt (original, passed in as full_prompt).
+    Level 2 — zone coordinates + minimal instruction (removes complex art direction
+               that may trigger content filters or confuse the model).
+    Level 3 — absolute minimum: "put logo on photo" (last resort).
+    """
+    zone_text = _zones_to_text(zones) if zones else ""
+
+    # Level 2: zone coords + basic instruction only
+    simplified = (
+        "You are a photo editor. Integrate the brand logo into the photo.\n\n"
+        + (zone_text + "\n\n" if zone_text else "")
+        + "Instructions:\n"
+        "• LOGO zone: place the logo (second image) centered in that area, "
+        "rendered naturally on the material.\n"
+        "• SURFACE zone (if any): apply the brand primary color.\n"
+        "• TEXT zone (if any): render the brand name in clean typography.\n"
+        "Keep all other parts of the photo pixel-perfect. Output the final image only."
+    )
+
+    # Level 3: absolute minimum — avoids any detail that could confuse the model
+    minimal = (
+        "Combine these two images: place the logo (second image) onto the photo "
+        "(first image) in a natural, centered position. "
+        "Preserve the photo's composition and surroundings. Output image only."
+    )
+
+    return [full_prompt, simplified, minimal]
+
+
+def _ai_reconstruct_with_retry(
+    original_path: Optional[Path],
+    full_prompt: str,
+    logo_path: Optional[Path],
+    api_key: str,
+    zones: Optional[dict] = None,
+    max_attempts: int = MAX_ATTEMPTS,
+    backoff_base: float = BACKOFF_BASE,
+    retry_wait: float = RETRY_WAIT,
+) -> Optional[bytes]:
+    """
+    Call _ai_reconstruct_mockup with automatic retry and prompt fallback.
+
+    Retry strategy (up to max_attempts total):
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │ Outcome            │ Action                                             │
+    ├─────────────────────────────────────────────────────────────────────────┤
+    │ Success            │ Return immediately                                 │
+    │ _RateLimitError    │ Wait backoff_base × 2^(rate_hits-1) s, same prompt│
+    │ None (no image)    │ Advance to next (simpler) prompt level             │
+    │ Other exception    │ Wait retry_wait s, advance to next prompt level   │
+    └─────────────────────────────────────────────────────────────────────────┘
+
+    Rate-limit waits do NOT consume an attempt slot — they retry the same prompt.
+    """
+    if not original_path:
+        return None
+
+    prompts = _build_fallback_prompts(full_prompt, zones)
+    prompt_idx = 0     # which prompt level we're on (0 = full, 1 = simplified, 2 = minimal)
+    attempt    = 0     # total attempts consumed (rate-limit retries don't count)
+    rate_hits  = 0     # how many rate-limit events so far (for exponential backoff)
+
+    while attempt < max_attempts and prompt_idx < len(prompts):
+        prompt  = prompts[prompt_idx]
+        level   = ["full", "simplified", "minimal"][min(prompt_idx, 2)]
+        attempt += 1
+
+        try:
+            result = _ai_reconstruct_mockup(
+                original_path=original_path,
+                prompt=prompt,
+                logo_path=logo_path,
+                api_key=api_key,
+                zones=zones,
+            )
+
+            if result is not None:
+                if prompt_idx > 0:
+                    console.print(
+                        f"      [dim]↳ succeeded on attempt {attempt} ({level} prompt)[/dim]"
+                    )
+                return result
+
+            # API returned nothing (content filter or empty response)
+            prompt_idx += 1
+            if prompt_idx < len(prompts) and attempt < max_attempts:
+                console.print(
+                    f"      [dim]↳ attempt {attempt} ({level}): no image returned — "
+                    f"retrying with {['full','simplified','minimal'][prompt_idx]} prompt…[/dim]"
+                )
+
+        except _RateLimitError:
+            rate_hits += 1
+            wait = backoff_base * (2 ** (rate_hits - 1))
+            console.print(
+                f"      [yellow]↳ attempt {attempt} ({level}): rate limit — "
+                f"waiting {wait:.0f}s then retrying same prompt…[/yellow]"
+            )
+            time.sleep(wait)
+            attempt -= 1  # rate-limit retry does not consume an attempt slot
+
+        except Exception as exc:
+            console.print(
+                f"      [dim]↳ attempt {attempt} ({level}): error ({exc}) — "
+                f"waiting {retry_wait:.0f}s…[/dim]"
+            )
+            time.sleep(retry_wait)
+            prompt_idx += 1  # move to simpler prompt after a hard error
 
     return None
 
@@ -1186,14 +1518,21 @@ def composite_all_mockups(
     """
     Composite brand assets onto every processed mockup for every direction.
 
-    Strategy (per mockup):
-      1. Try AI reconstruction (Gemini multi-modal) for natural brand integration.
-      2. If AI fails or GEMINI_API_KEY is not set → Pillow pixel-mask fallback.
+    Pipeline (always AI — no Pillow fallback):
+      1. Read processed image with Pillow → extract zone bounding boxes (local, never sent to AI).
+      2. Find matching high-quality original photo from originals/.
+      3. Build prompt embedding zone coordinates as plain text.
+      4. Call Gemini with: original photo + brand logo (NO processed image).
+         Gemini reconstructs the original photo with brand identity integrated at
+         the specified zone coordinates.
+
+    The processed image is used ONLY for programmatic zone detection.
+    It is never forwarded to any AI model as a visual input.
 
     Args:
         all_assets:    Dict mapping option_number → DirectionAssets.
-        metadata_path: Path to metadata.json (zone presence info, currently unused).
-        processed_dir: Directory containing processed mockup images.
+        metadata_path: Path to metadata.json (unused — zones read from processed images).
+        processed_dir: Directory containing processed guide images.
 
     Returns:
         Dict mapping option_number → [composited_mockup_path, ...].
@@ -1211,6 +1550,10 @@ def composite_all_mockups(
         return {}
 
     api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        console.print("  [yellow]⚠ GEMINI_API_KEY not set — cannot run AI reconstruction[/yellow]")
+        return {}
+
     results: Dict[int, List[Path]] = {}
 
     for num, assets in all_assets.items():
@@ -1222,59 +1565,75 @@ def composite_all_mockups(
         mockup_dir.mkdir(parents=True, exist_ok=True)
 
         composited: List[Path] = []
-        ai_count = pillow_count = 0
+        ok_count   = 0
+        fail_count = 0
         brand_name = assets.direction.direction_name
 
-        console.print(f"\n  Option {num} — compositing {len(processed_files)} mockup(s)…")
+        console.print(f"\n  Option {num} — AI compositing {len(processed_files)} mockup(s)…")
 
         for mp in processed_files:
             out_path = mockup_dir / (mp.stem + "_composite.png")
             try:
-                ai_ok = False
+                # ── Step 1: Extract zones programmatically (Pillow only) ───────
+                zones     = _extract_zones(mp)
+                zone_text = _zones_to_text(zones)
+                n_zones   = len(zones)
 
-                # ── Try AI reconstruction ──────────────────────────────────────
-                if api_key:
-                    mockup_key = MOCKUP_KEY_MAP.get(mp.name)
-                    if mockup_key:
-                        prompt = build_mockup_prompt(mockup_key, assets, brand_name)
-                        # Prefer transparent logo — cleaner AI integration
-                        logo_for_ai = (
-                            assets.logo_transparent
-                            if (assets.logo_transparent
-                                and assets.logo_transparent.exists()
-                                and assets.logo_transparent.stat().st_size > 100)
-                            else assets.logo
-                        )
-                        ai_bytes = _ai_reconstruct_mockup(mp, prompt, logo_for_ai, api_key)
-                        if ai_bytes:
-                            out_path.write_bytes(ai_bytes)
-                            composited.append(out_path)
-                            console.print(f"    [green]✓ AI [/green] {mp.name}")
-                            ai_count += 1
-                            ai_ok = True
+                # ── Step 2: Find high-quality original ────────────────────────
+                original_path = _find_original(mp)
+                if not original_path:
+                    console.print(
+                        f"    [yellow]⚠ {mp.name}: original not found — skipping[/yellow]"
+                    )
+                    fail_count += 1
+                    continue
 
-                # ── Pillow pixel-mask fallback ─────────────────────────────────
-                if not ai_ok:
-                    original = Image.open(mp).convert("RGBA")
-                    canvas   = original.copy()
-                    arr      = np.array(original)
+                # ── Step 3: Build prompt with embedded zone coords ─────────────
+                mockup_key = MOCKUP_KEY_MAP.get(mp.name, "")
+                prompt     = build_mockup_prompt(
+                    mockup_key, assets, brand_name, zone_text=zone_text
+                )
 
-                    handler   = HANDLER_MAP.get(mp.name, _handle_generic)
-                    zones_str = handler(canvas, original, assets, arr)
+                # ── Step 4: AI reconstruction — original + logo only ──────────
+                # Prefer transparent logo (cleaner integration)
+                logo_for_ai = (
+                    assets.logo_transparent
+                    if (assets.logo_transparent
+                        and assets.logo_transparent.exists()
+                        and assets.logo_transparent.stat().st_size > 100)
+                    else assets.logo
+                )
 
-                    canvas.convert("RGB").save(str(out_path), format="PNG")
+                ai_bytes = _ai_reconstruct_with_retry(
+                    original_path=original_path,
+                    full_prompt=prompt,
+                    logo_path=logo_for_ai,
+                    api_key=api_key,
+                    zones=zones,
+                )
+
+                if ai_bytes:
+                    out_path.write_bytes(ai_bytes)
                     composited.append(out_path)
-                    console.print(f"    [blue]✓ PIL[/blue] {mp.name}  [{zones_str}]")
-                    pillow_count += 1
+                    console.print(
+                        f"    [green]✓ AI[/green] {mp.name}"
+                        f"  [dim]zones:{n_zones}  orig:{original_path.name}[/dim]"
+                    )
+                    ok_count += 1
+                else:
+                    console.print(
+                        f"    [yellow]⚠ {mp.name}: all {MAX_ATTEMPTS} attempts failed — skipped[/yellow]"
+                    )
+                    fail_count += 1
 
             except Exception as exc:
                 console.print(f"    [yellow]⚠ {mp.name}: {exc}[/yellow]")
-                composited.append(mp)   # fallback: original unmodified file
+                fail_count += 1
 
         results[num] = composited
-        summary = f"AI:{ai_count}  PIL:{pillow_count}"
         console.print(
-            f"    [dim]→ {mockup_dir}  ({len(composited)} files  {summary})[/dim]"
+            f"    [dim]→ {mockup_dir}  "
+            f"({ok_count} ok  {fail_count} failed  of {len(processed_files)})[/dim]"
         )
 
     return results
