@@ -58,13 +58,28 @@ class BrandDirection(BaseModel):
     logo_concept: str = Field(
         description="2–3 sentences describing the logo form, shape language, and symbol concept"
     )
-    image_prompt: str = Field(
+    background_prompt: str = Field(
         description=(
-            "A detailed, art-director-quality prompt for Gemini image generation. "
-            "Describe a stylescape layout: brand color swatches arranged visually, "
-            "typography specimens, graphic element samples, logo concept sketched in, "
-            "and 1–2 product/context mockups. Specify mood, lighting, and composition. "
-            "Minimum 80 words."
+            "Gemini image generation prompt for the atmospheric background scene. "
+            "NO text, NO logos, NO words of any kind in the image. "
+            "Describe: mood, color palette in use, texture, lighting quality, abstract or environmental composition. "
+            "Should feel like the emotional world of the brand. Minimum 60 words."
+        )
+    )
+    logo_prompt: str = Field(
+        description=(
+            "Gemini image generation prompt for the logo concept mark. "
+            "A single abstract symbol or geometric mark on a plain white background. "
+            "NO text, NO letterforms, NO words — only the visual mark itself. "
+            "Describe the exact shape, form language, line weight, and visual metaphor. Minimum 40 words."
+        )
+    )
+    pattern_prompt: str = Field(
+        description=(
+            "Gemini image generation prompt for a seamless brand pattern or texture tile. "
+            "NO text, NO logos. "
+            "Describe: motif type (geometric, organic, abstract), density, colors from the palette, "
+            "scale, and mood. Should work as a background or surface texture. Minimum 40 words."
         )
     )
 
@@ -101,16 +116,25 @@ Propose a deliberate balance between market recognition and designer instinct. B
 **Option 4 — Wild Card**
 Surprise. Break from the brief's explicit direction. Use your understanding of the product, audience, and cultural moment to propose an unexpected direction that might be exactly right. No moodboard constraint.
 
-**For image prompts:**
-Write as if briefing a top motion designer on the stylescape composition. Describe:
-- The overall color field and mood
-- How typography is displayed (specimen, weights, pairings in use)
-- Graphic element samples in the layout
-- A gestural logo concept (not final, but directional)
-- 1–2 product mockup contexts (social post, dashboard screen, packaging, etc.)
-- Lighting, texture, and compositional energy
+**For image prompts — 3 separate prompts per direction:**
 
-Be specific. Vague prompts produce generic images.
+background_prompt: Write as if briefing a photographer or digital artist on the mood image.
+- No text, no logos, no UI — pure atmosphere
+- Specify exact colors from the palette, lighting quality (soft/dramatic/diffused), texture or surface
+- Could be: abstract gradient field, macro texture, environmental scene, digital noise pattern
+- Should feel like the emotional world of the brand at a glance
+
+logo_prompt: Brief a graphic designer on a single abstract mark.
+- White background, centered mark only — absolutely no text or letterforms
+- Describe the exact geometric or organic form, line weight, whether it's filled/outlined
+- Reference the visual metaphor (e.g. "a simplified wave form suggesting signal flow")
+- Clean, scalable, distinctive
+
+pattern_prompt: Brief a surface designer on a repeating tile.
+- No text, no logos — pure pattern
+- Specify the motif (chevron, dot grid, organic cells, flowing lines, etc.)
+- Colors drawn directly from the palette, exact density and scale
+- Mood should match the direction's personality
 """
 
 

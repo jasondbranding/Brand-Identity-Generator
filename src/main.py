@@ -25,7 +25,8 @@ from rich.rule import Rule
 
 from .parser import parse_brief
 from .director import BrandDirectionsOutput, generate_directions, display_directions
-from .visualizer import generate_images
+from .generator import generate_all_assets
+from .compositor import build_all_stylescapes
 
 load_dotenv()
 
@@ -170,20 +171,27 @@ def refinement_loop(
             iteration += 1
             console.print(f"\n[bold cyan]→ Regenerating directions (iteration {iteration})...[/bold cyan]")
 
-            start = time.time()
+            t0 = time.time()
             current_output = generate_directions(brief, refinement_feedback=feedback)
-            elapsed = time.time() - start
+            console.print(f"  [green]✓ Directions in {time.time() - t0:.1f}s[/green]\n")
 
-            console.print(f"  [green]✓ Done in {elapsed:.1f}s[/green]\n")
             display_directions(current_output)
-
-            # Save updated outputs
             save_directions_md(current_output, output_dir)
             save_directions_json(current_output, output_dir)
 
             if generate_imgs:
-                img_dir = output_dir / "images" / f"iteration_{iteration}"
-                generate_images(current_output, output_dir=img_dir)
+                iter_dir = output_dir / f"iteration_{iteration}"
+                t1 = time.time()
+                all_assets = generate_all_assets(
+                    current_output.directions, output_dir=iter_dir
+                )
+                console.print(f"  [green]✓ Images in {time.time() - t1:.1f}s[/green]")
+
+                t2 = time.time()
+                stylescape_paths = build_all_stylescapes(all_assets, output_dir=iter_dir)
+                console.print(f"  [green]✓ Stylescapes in {time.time() - t2:.1f}s[/green]")
+                for num, path in stylescape_paths.items():
+                    console.print(f"    Option {num}: {path}")
 
     return current_output
 
@@ -191,7 +199,6 @@ def refinement_loop(
 def _save_selection(selected, output_dir: Path) -> None:
     """Save the confirmed direction to a selection.json file."""
     selection_path = output_dir / "selection.json"
-    import json
     selection_path.write_text(
         json.dumps(selected.model_dump(), indent=2), encoding="utf-8"
     )
@@ -203,6 +210,7 @@ def _save_selection(selected, output_dir: Path) -> None:
 def main() -> None:
     _check_env()
     args = parse_args()
+    pipeline_start = time.time()
 
     # Set up output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -221,37 +229,45 @@ def main() -> None:
     brief = parse_brief(args.brief, mode=args.mode)
     console.print(f"  [green]✓[/green] Loaded brief ({args.mode} mode, {len(brief.keywords)} keywords)")
 
-    # ── Step 2: Generate directions via Claude ───────────────────────────────
-    console.print("\n[bold]Step 2/3 — Generating brand directions (Claude)[/bold]")
-    start = time.time()
+    # ── Step 2: Generate directions via Gemini ───────────────────────────────
+    console.print("\n[bold]Step 2/3 — Generating brand directions (Gemini)[/bold]")
+    t0 = time.time()
     directions_output = generate_directions(brief)
-    elapsed = time.time() - start
-    console.print(f"  [green]✓ Done in {elapsed:.1f}s[/green]")
+    console.print(f"  [green]✓ Done in {time.time() - t0:.1f}s[/green]")
 
     display_directions(directions_output)
 
-    # Save Phase 1 outputs
     md_path = save_directions_md(directions_output, output_dir)
     json_path = save_directions_json(directions_output, output_dir)
     console.print(f"\n  [dim]Saved: {md_path}  |  {json_path}[/dim]")
 
-    # ── Step 3: Generate images via Gemini ───────────────────────────────────
+    # ── Step 3: Generate images + assemble stylescapes ───────────────────────
+    stylescape_paths: dict = {}
     if not args.no_images:
-        console.print("\n[bold]Step 3/3 — Generating stylescape images (Gemini)[/bold]")
-        img_start = time.time()
-        image_paths = generate_images(directions_output, output_dir=output_dir / "images")
-        img_elapsed = time.time() - img_start
-        console.print(f"\n  [green]✓ {len(image_paths)} images generated in {img_elapsed:.1f}s[/green]")
-        for num, path in image_paths.items():
+        console.print("\n[bold]Step 3/3 — Generating images + assembling stylescapes (Gemini + Pillow)[/bold]")
+
+        t1 = time.time()
+        all_assets = generate_all_assets(
+            directions_output.directions, output_dir=output_dir
+        )
+        console.print(f"\n  [green]✓ {sum(1 for a in all_assets.values() if a.background)} background(s), "
+                      f"{sum(1 for a in all_assets.values() if a.logo)} logo(s), "
+                      f"{sum(1 for a in all_assets.values() if a.pattern)} pattern(s) — "
+                      f"{time.time() - t1:.1f}s[/green]")
+
+        t2 = time.time()
+        stylescape_paths = build_all_stylescapes(all_assets, output_dir=output_dir)
+        console.print(f"  [green]✓ {len(stylescape_paths)} stylescape(s) assembled — {time.time() - t2:.1f}s[/green]")
+        for num, path in stylescape_paths.items():
             console.print(f"    Option {num}: {path}")
     else:
         console.print("\n  [dim]Image generation skipped (--no-images)[/dim]")
-        image_paths = {}
 
-    total_elapsed = time.time() - start
+    n_directions = len(directions_output.directions)
+    total_elapsed = time.time() - pipeline_start
     console.print(
         Panel(
-            f"4 directions generated in [bold]{total_elapsed:.0f}s[/bold]\n"
+            f"{n_directions} direction(s) generated in [bold]{total_elapsed:.0f}s[/bold]\n"
             f"Outputs saved to: [bold]{output_dir}[/bold]",
             title="[bold green]Phase 1 Complete[/bold green]",
             border_style="green",
