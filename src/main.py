@@ -394,10 +394,28 @@ def main() -> None:
     brief = parse_brief(args.brief, mode=args.mode)
     console.print(f"  [green]✓[/green] Loaded brief ({args.mode} mode, {len(brief.keywords)} keywords)")
 
+    # ── Step 1b: Market research (optional, non-blocking) ────────────────────
+    research_context = ""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key and not args.no_images:
+        try:
+            from .researcher import BrandResearcher
+            console.print("\n[bold cyan]Step 1b — Market Research (Gemini + Search)[/bold cyan]")
+            researcher = BrandResearcher(api_key)
+            result = researcher.research(brief.brief_text, brief.keywords)
+            research_context = result.to_director_context()
+            if result.reference_queries:
+                console.print(
+                    f"  [dim]Suggested searches: {', '.join(result.reference_queries[:3])}[/dim]"
+                )
+            console.print("  [green]✓[/green] Market research complete")
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Research skipped: {e}[/yellow]")
+
     # ── Step 2: Generate directions via Gemini ───────────────────────────────
     console.print("\n[bold]Step 2/4 — Generating brand directions (Gemini)[/bold]")
     t0 = time.time()
-    directions_output = generate_directions(brief)
+    directions_output = generate_directions(brief, research_context=research_context)
     console.print(f"  [green]✓ Done in {time.time() - t0:.1f}s[/green]")
 
     display_directions(directions_output)
@@ -413,7 +431,9 @@ def main() -> None:
 
         t1 = time.time()
         all_assets = generate_all_assets(
-            directions_output.directions, output_dir=output_dir
+            directions_output.directions,
+            output_dir=output_dir,
+            brief_keywords=brief.keywords,
         )
         console.print(f"\n  [green]✓ {sum(1 for a in all_assets.values() if a.background)} background(s), "
                       f"{sum(1 for a in all_assets.values() if a.logo)} logo(s), "

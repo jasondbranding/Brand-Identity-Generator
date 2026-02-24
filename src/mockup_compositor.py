@@ -14,10 +14,15 @@ Per-mockup handlers dispatch on filename and apply specific art direction.
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+
+from google import genai
+from google.genai import types as genai_types
 
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -166,6 +171,36 @@ def _cover_fill(
     layer.paste(crop, (x1, y1))
     mp = Image.fromarray((mask * 255).astype(np.uint8), "L")
     canvas.paste(layer, (0, 0), mp)
+
+
+def _replace_placeholder_zone(
+    canvas: Image.Image,
+    arr: np.ndarray,
+    color: Tuple[int, int, int],
+    tol: int = TOLERANCE,
+) -> Tuple[np.ndarray, Optional[Tuple[int, int, int, int]]]:
+    """
+    Canonical placeholder eraser — MUST be called before placing any content.
+
+    Steps:
+      1. Scan entire image for pixels near *color* (±tol per channel).
+      2. Build boolean pixel mask (True = placeholder pixel).
+      3. Sample median colour of border pixels OUTSIDE the mask (5-px dilation)
+         to find the natural surrounding fill colour.
+      4. Overwrite ALL masked pixels with that surrounding colour.
+      5. Return (mask, bbox) so the caller can composite logos / text / images
+         on top of the now-clean surface.
+
+    Guarantees placeholder pixels are replaced at pixel level — not bounding-box
+    rectangle — so perspective strips, parallelograms, and rounded corners are
+    all erased exactly.
+    """
+    mask = _make_mask(arr, color, tol)
+    if mask.sum() < MIN_PX:
+        return mask, None
+    fill = _sample_surrounding(arr, mask)
+    _fill_mask(canvas, mask, fill)
+    return mask, _mask_bbox(mask)
 
 
 # ── Logo processing utilities ─────────────────────────────────────────────────
@@ -397,9 +432,13 @@ def _handle_app_icon(
                 ly = (h - logo.height) // 2
                 patch.paste(logo, (lx, ly), logo)
             patch = _rounded_icon(patch, 0.22)
-            # Restore original behind rounded patch, then paste patch
-            orig_crop = original.convert("RGBA").crop((x1, y1, x2, y2))
-            canvas.paste(orig_crop, (x1, y1))
+            # Step 1: ERASE all magenta pixels with surrounding colour.
+            # Restoring `original` here would re-introduce magenta at the
+            # transparent corners of the rounded patch — wrong.
+            sur = _sample_surrounding(arr, logo_mask)
+            _fill_mask(canvas, logo_mask, sur)
+            # Step 2: Paste rounded patch — transparent corners now show the
+            # clean surrounding phone-screen colour, not magenta.
             canvas.paste(patch, (x1, y1), patch)
             zones.append("LOGO")
 
@@ -517,45 +556,56 @@ def _handle_billboard(
 ) -> str:
     """
     horizontal_billboard_processed.png  — highest visual impact mockup.
-    Yellow  → background.png (Gemini mood scene) cover-filled; fallback primary colour.
-    Magenta → white/black logo depending on background brightness, centered.
+    Yellow  → background.png cover-filled; fallback primary colour.
+    Magenta → ERASED first (same cover-fill as surface), then logo on top.
     """
     direction = assets.direction
     primary   = _hex_to_rgb(direction.colors[0].hex)
     zones: List[str] = []
+
+    # Load background image once — shared by surface AND logo zones.
+    bg_src = None
+    if (assets.background and assets.background.exists()
+            and assets.background.stat().st_size > 100):
+        bg_src = Image.open(assets.background).convert("RGBA")
 
     # ── SURFACE → background image ────────────────────────────────────────────
     surf_mask = _make_mask(arr, YELLOW)
     if surf_mask.sum() >= MIN_PX:
         bbox = _mask_bbox(surf_mask)
         if bbox:
-            bg_src = None
-            if (assets.background and assets.background.exists()
-                    and assets.background.stat().st_size > 100):
-                bg_src = Image.open(assets.background).convert("RGBA")
             if bg_src:
                 _cover_fill(canvas, bg_src, surf_mask, bbox)
             else:
                 _fill_mask(canvas, surf_mask, primary)
             zones.append("SURFACE")
 
-    # ── LOGO → adapt colour to what the background now looks like ─────────────
+    # ── LOGO → Step 1: erase ALL magenta pixels; Step 2: paste logo ───────────
     logo_mask = _make_mask(arr, MAGENTA)
     if logo_mask.sum() >= MIN_PX:
         bbox = _mask_bbox(logo_mask)
-        if bbox and assets.logo and assets.logo.exists() and assets.logo.stat().st_size > 100:
+        if bbox:
             x1, y1, x2, y2 = bbox
-            # Sample canvas (now with background image) at logo bbox
-            c_arr   = np.array(canvas)
-            area_px = c_arr[:, :, :3][logo_mask]
-            avg_br  = _brightness(tuple(np.mean(area_px, axis=0).astype(int)))
-            logo_color = (255, 255, 255) if avg_br < 128 else (20, 20, 20)
 
-            logo = Image.open(assets.logo).convert("RGBA")
-            logo = _remove_white(logo)
-            logo = _colorize(logo, logo_color)
-            logo = _fit(logo, x2 - x1, y2 - y1, 0.55)
-            _paste_bbox_center(canvas, logo, x1, y1, x2, y2)
+            # Step 1: ERASE — cover-fill logo zone with the same background image
+            # so the billboard face is seamless (no magenta leaking around logo).
+            if bg_src:
+                _cover_fill(canvas, bg_src, logo_mask, bbox)
+            else:
+                _fill_mask(canvas, logo_mask, primary)
+
+            # Step 2: Paste logo — sample post-fill brightness to pick colour.
+            if assets.logo and assets.logo.exists() and assets.logo.stat().st_size > 100:
+                c_arr   = np.array(canvas)
+                area_px = c_arr[logo_mask, :3]
+                avg_br  = _brightness(tuple(np.mean(area_px, axis=0).astype(int)))
+                logo_color = (255, 255, 255) if avg_br < 128 else (20, 20, 20)
+
+                logo = Image.open(assets.logo).convert("RGBA")
+                logo = _remove_white(logo)
+                logo = _colorize(logo, logo_color)
+                logo = _fit(logo, x2 - x1, y2 - y1, 0.55)
+                _paste_bbox_center(canvas, logo, x1, y1, x2, y2)
             zones.append("LOGO")
 
     return " + ".join(zones) if zones else "no zones"
@@ -766,9 +816,12 @@ def _handle_x_account(
                 ly = (h - logo.height) // 2
                 patch.paste(logo, (lx, ly), logo)
             patch = _rounded_icon(patch, 0.22)
-            # Restore original behind patch area (no hard rectangular seam)
-            orig_crop = original.convert("RGBA").crop((x1, y1, x2, y2))
-            canvas.paste(orig_crop, (x1, y1))
+            # Step 1: ERASE all magenta pixels with surrounding colour.
+            # Restoring `original` would re-introduce magenta at the transparent
+            # corners of the rounded avatar patch — wrong.
+            sur = _sample_surrounding(arr, logo_mask)
+            _fill_mask(canvas, logo_mask, sur)
+            # Step 2: Paste rounded avatar patch — corners show page bg, not magenta.
             canvas.paste(patch, (x1, y1), patch)
             zones.append("LOGO")
 
@@ -850,6 +903,275 @@ HANDLER_MAP: Dict[str, Handler] = {
 }
 
 
+# ── AI reconstruction layer ────────────────────────────────────────────────────
+
+# Maps processed filename → key used in MOCKUP_PROMPTS
+MOCKUP_KEY_MAP: Dict[str, str] = {
+    "wall_logo_processed.png":              "wall_logo",
+    "app_Icon_phone_flat_processed.png":    "app_icon_phone",
+    "black_shirt_logo_processed.png":       "black_shirt",
+    "employee_id_card_processed.png":       "employee_id",
+    "horizontal_billboard_processed.png":   "billboard",
+    "logo_transparent_disk_processed.png":  "disk",
+    "name_card_processed.png":              "name_card",
+    "tote_bag_processed.jpg":               "tote_bag",
+    "tshirt_processed.png":                 "tshirt",
+    "x_account_processed.png":              "x_account",
+}
+
+# Per-mockup scene specs used to build AI reconstruction prompts
+MOCKUP_PROMPTS: Dict[str, Dict[str, str]] = {
+    "wall_logo": {
+        "scene": (
+            "Architectural interior wall with dimensional brand signage. "
+            "The logo appears as mounted letters or a logo mark on the wall surface, "
+            "casting realistic drop shadows."
+        ),
+        "logo_placement": "centered on the parallelogram-shaped architectural panel",
+        "logo_color": "white or off-white",
+        "logo_size": "large, spanning 65% of the panel width",
+        "material": "painted metal or dimensional acrylic letters",
+        "style": "premium corporate architectural signage, photorealistic",
+    },
+    "app_icon_phone": {
+        "scene": (
+            "Smartphone home screen showing a branded iOS app icon "
+            "with rounded corners and an app name label directly below."
+        ),
+        "logo_placement": "centered inside a rounded-square icon with brand primary color as background",
+        "logo_color": "white",
+        "logo_size": "filling 65% of the icon area",
+        "material": "flat vector, digital",
+        "style": "iOS app icon, clean, modern, app store quality",
+    },
+    "black_shirt": {
+        "scene": (
+            "Black t-shirt laid flat. Brand logo screen-printed on the chest area "
+            "with authentic cotton fabric texture showing through the ink."
+        ),
+        "logo_placement": "center chest",
+        "logo_color": "white",
+        "logo_size": "medium, 45% of the print zone",
+        "material": "screen-print on cotton, fabric texture overlay",
+        "style": "premium apparel merchandise, streetwear",
+    },
+    "employee_id": {
+        "scene": (
+            "Corporate employee ID card with a colorful lanyard. "
+            "Card face shows the company logo and name; lanyard stripe uses brand primary color."
+        ),
+        "logo_placement": "logo on the left of the card face, brand name to the right",
+        "logo_color": "white on dark background",
+        "logo_size": "natural, fitting the card logo area",
+        "material": "PVC card, dye-sublimation print quality",
+        "style": "professional corporate, clean",
+    },
+    "billboard": {
+        "scene": (
+            "Large outdoor horizontal billboard. The billboard surface shows brand photography "
+            "and a prominent logo mark on the right side of the board face."
+        ),
+        "logo_placement": "right side of the billboard face",
+        "logo_color": "white (on photographic background)",
+        "logo_size": "large, 55% of the logo zone width",
+        "material": "vinyl print, outdoor advertising",
+        "style": "high-impact outdoor advertising, photorealistic",
+    },
+    "disk": {
+        "scene": (
+            "Acrylic or glass transparent disk/puck award with brand logo. "
+            "Clean reflections, premium material, minimal aesthetic."
+        ),
+        "logo_placement": "centered on the disk face",
+        "logo_color": "dark/near-black on white or clear surface",
+        "logo_size": "55% of the disk zone",
+        "material": "laser-etched acrylic",
+        "style": "premium minimal, transparent, corporate award",
+    },
+    "name_card": {
+        "scene": (
+            "Luxury two-sided business card. One face uses brand primary color with "
+            "the brand name in large typography. The other face is white with a small dark logo."
+        ),
+        "logo_placement": "centered on white card face; name fills the colored face",
+        "logo_color": "dark on white face; high-contrast on colored face",
+        "logo_size": "40% of the white face logo zone",
+        "material": "letterpress or offset print on thick card stock",
+        "style": "luxury business card, premium print quality",
+    },
+    "tote_bag": {
+        "scene": (
+            "Natural canvas tote bag with brand logo screen-printed on the front panel. "
+            "Woven fabric texture is visible through the ink."
+        ),
+        "logo_placement": "centered on the bag face",
+        "logo_color": "contrasting with bag material color",
+        "logo_size": "large, 75% of the logo zone",
+        "material": "screen-print on canvas, fabric texture",
+        "style": "eco merchandise, casual lifestyle",
+    },
+    "tshirt": {
+        "scene": (
+            "Light-colored t-shirt with brand logo printed on the chest area. "
+            "Cotton fabric texture visible through the print."
+        ),
+        "logo_placement": "center chest, slightly above mid-point",
+        "logo_color": "dark/black on light shirt",
+        "logo_size": "medium, 45% of the print zone",
+        "material": "screen-print on cotton",
+        "style": "clean apparel merchandise",
+    },
+    "x_account": {
+        "scene": (
+            "X (Twitter) profile page screenshot. Profile banner shows brand imagery. "
+            "Avatar is a rounded-square with light background and dark logo. "
+            "Username display shows the brand name."
+        ),
+        "logo_placement": "rounded avatar on light background; banner shows brand imagery",
+        "logo_color": "dark on light avatar background; any color on banner",
+        "logo_size": "70% of the avatar zone",
+        "material": "digital, flat design",
+        "style": "social media profile, digital platform UI",
+    },
+}
+
+
+def build_mockup_prompt(
+    mockup_key: str,
+    assets: "DirectionAssets",
+    brand_name: str,
+) -> str:
+    """
+    Build a structured natural-language prompt for Gemini AI mockup reconstruction.
+
+    Combines per-mockup scene specs (from MOCKUP_PROMPTS) with live brand data
+    (colors, direction name) to guide the model's output.
+    """
+    direction = assets.direction
+    spec = MOCKUP_PROMPTS.get(mockup_key, {})
+
+    # Brand color summary
+    primary_hex = direction.colors[0].hex if direction.colors else "#333333"
+    colors_desc = ", ".join(c.hex for c in direction.colors[:3]) if direction.colors else primary_hex
+
+    system_context = (
+        "You are a professional brand identity mockup renderer.\n"
+        "Your task: take a reference mockup image that has colored placeholder zones "
+        "and reconstruct it with a real brand identity applied.\n\n"
+        "Placeholder color legend:\n"
+        "  • Magenta/pink (#FF00FF) = logo placement zone\n"
+        "  • Yellow (#FFFF00)       = brand color surface / imagery zone\n"
+        "  • Cyan (#00FFFF)         = brand name / text zone\n\n"
+        "Rules:\n"
+        "  - Replace ALL placeholder zones with the brand identity shown.\n"
+        "  - Keep all non-placeholder areas IDENTICAL: surroundings, shadows, materials, "
+        "lighting, perspective, and scene composition must not change.\n"
+        "  - Output a single photorealistic image with the same dimensions and crop as the reference.\n"
+        "  - No additional text or words except in designated cyan text zones.\n\n"
+    )
+
+    brand_brief = (
+        f"Brand name: {brand_name}\n"
+        f"Primary color: {primary_hex}\n"
+        f"Color palette: {colors_desc}\n"
+        f"Brand mood / direction: {direction.direction_name}\n\n"
+    )
+
+    mockup_spec = ""
+    if spec:
+        mockup_spec = (
+            f"Mockup scene: {spec.get('scene', '')}\n"
+            f"Logo placement: {spec.get('logo_placement', 'centered in the placeholder zone')}\n"
+            f"Logo color: {spec.get('logo_color', 'contrasting with background')}\n"
+            f"Logo size: {spec.get('logo_size', '60% of the zone')}\n"
+            f"Material / rendering: {spec.get('material', 'standard print')}\n"
+            f"Visual style: {spec.get('style', 'professional, clean')}\n\n"
+        )
+
+    instructions = (
+        "Step-by-step instructions:\n"
+        "1. Analyse the reference mockup image (first image) — identify all placeholder zones.\n"
+        "2. Apply the brand primary color to all YELLOW zones.\n"
+        "3. Place the logo (second image) in all MAGENTA zones — render it naturally on the "
+        "material (screen-print texture on fabric, etched look on acrylic, etc.).\n"
+        "4. Render the brand name text in all CYAN zones with appropriate typography.\n"
+        "5. Output the final photorealistic mockup image."
+    )
+
+    return system_context + brand_brief + mockup_spec + instructions
+
+
+def _ai_reconstruct_mockup(
+    mockup_path: Path,
+    prompt: str,
+    logo_path: Optional[Path],
+    api_key: str,
+) -> Optional[bytes]:
+    """
+    Use Gemini multi-modal image generation to reconstruct a mockup with brand identity.
+
+    Content sent to Gemini:
+      [text: system + brand brief + instructions]
+      [image: reference mockup with placeholder zones]
+      [text: logo introduction]
+      [image: brand logo (transparent version preferred)]
+      [text: closing instruction]
+
+    Returns raw image bytes on success, None on any failure.
+    """
+    try:
+        client = genai.Client(api_key=api_key)
+
+        # Read mockup
+        mockup_bytes = mockup_path.read_bytes()
+        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                    ".png": "image/png", ".webp": "image/webp"}
+        mockup_mime = mime_map.get(mockup_path.suffix.lower(), "image/png")
+
+        # Build content parts
+        parts = [
+            genai_types.Part.from_text(prompt),
+            genai_types.Part.from_bytes(data=mockup_bytes, mime_type=mockup_mime),
+        ]
+
+        # Add logo
+        if logo_path and logo_path.exists() and logo_path.stat().st_size > 100:
+            logo_bytes = logo_path.read_bytes()
+            parts.append(genai_types.Part.from_text(
+                "Brand logo mark (integrate this into all magenta zones, "
+                "render naturally on the material):"
+            ))
+            parts.append(genai_types.Part.from_bytes(
+                data=logo_bytes, mime_type="image/png"
+            ))
+
+        parts.append(genai_types.Part.from_text(
+            "Output the reconstructed mockup image with brand identity fully applied. "
+            "Image only — no captions."
+        ))
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-exp-image-generation",
+            contents=parts,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+            ),
+        )
+
+        for candidate in response.candidates or []:
+            for part in candidate.content.parts or []:
+                if hasattr(part, "inline_data") and part.inline_data:
+                    data = part.inline_data.data
+                    if isinstance(data, str):
+                        data = base64.b64decode(data)
+                    return data
+
+    except Exception as e:
+        console.print(f"    [dim]AI reconstruction failed: {e}[/dim]")
+
+    return None
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def composite_all_mockups(
@@ -860,9 +1182,13 @@ def composite_all_mockups(
     """
     Composite brand assets onto every processed mockup for every direction.
 
+    Strategy (per mockup):
+      1. Try AI reconstruction (Gemini multi-modal) for natural brand integration.
+      2. If AI fails or GEMINI_API_KEY is not set → Pillow pixel-mask fallback.
+
     Args:
         all_assets:    Dict mapping option_number → DirectionAssets.
-        metadata_path: Path to metadata.json (used for zone presence info only).
+        metadata_path: Path to metadata.json (zone presence info, currently unused).
         processed_dir: Directory containing processed mockup images.
 
     Returns:
@@ -880,6 +1206,7 @@ def composite_all_mockups(
         console.print(f"  [yellow]⚠ No images found in {processed_dir}[/yellow]")
         return {}
 
+    api_key = os.environ.get("GEMINI_API_KEY")
     results: Dict[int, List[Path]] = {}
 
     for num, assets in all_assets.items():
@@ -891,27 +1218,59 @@ def composite_all_mockups(
         mockup_dir.mkdir(parents=True, exist_ok=True)
 
         composited: List[Path] = []
+        ai_count = pillow_count = 0
+        brand_name = assets.direction.direction_name
+
         console.print(f"\n  Option {num} — compositing {len(processed_files)} mockup(s)…")
 
         for mp in processed_files:
             out_path = mockup_dir / (mp.stem + "_composite.png")
             try:
-                original = Image.open(mp).convert("RGBA")
-                canvas   = original.copy()
-                arr      = np.array(original)
+                ai_ok = False
 
-                handler   = HANDLER_MAP.get(mp.name, _handle_generic)
-                zones_str = handler(canvas, original, assets, arr)
+                # ── Try AI reconstruction ──────────────────────────────────────
+                if api_key:
+                    mockup_key = MOCKUP_KEY_MAP.get(mp.name)
+                    if mockup_key:
+                        prompt = build_mockup_prompt(mockup_key, assets, brand_name)
+                        # Prefer transparent logo — cleaner AI integration
+                        logo_for_ai = (
+                            assets.logo_transparent
+                            if (assets.logo_transparent
+                                and assets.logo_transparent.exists()
+                                and assets.logo_transparent.stat().st_size > 100)
+                            else assets.logo
+                        )
+                        ai_bytes = _ai_reconstruct_mockup(mp, prompt, logo_for_ai, api_key)
+                        if ai_bytes:
+                            out_path.write_bytes(ai_bytes)
+                            composited.append(out_path)
+                            console.print(f"    [green]✓ AI [/green] {mp.name}")
+                            ai_count += 1
+                            ai_ok = True
 
-                canvas.convert("RGB").save(str(out_path), format="PNG")
-                composited.append(out_path)
-                console.print(f"    [green]✓[/green] {mp.name}  [{zones_str}]")
+                # ── Pillow pixel-mask fallback ─────────────────────────────────
+                if not ai_ok:
+                    original = Image.open(mp).convert("RGBA")
+                    canvas   = original.copy()
+                    arr      = np.array(original)
+
+                    handler   = HANDLER_MAP.get(mp.name, _handle_generic)
+                    zones_str = handler(canvas, original, assets, arr)
+
+                    canvas.convert("RGB").save(str(out_path), format="PNG")
+                    composited.append(out_path)
+                    console.print(f"    [blue]✓ PIL[/blue] {mp.name}  [{zones_str}]")
+                    pillow_count += 1
 
             except Exception as exc:
                 console.print(f"    [yellow]⚠ {mp.name}: {exc}[/yellow]")
                 composited.append(mp)   # fallback: original unmodified file
 
         results[num] = composited
-        console.print(f"    [dim]→ {mockup_dir}  ({len(composited)} files)[/dim]")
+        summary = f"AI:{ai_count}  PIL:{pillow_count}"
+        console.print(
+            f"    [dim]→ {mockup_dir}  ({len(composited)} files  {summary})[/dim]"
+        )
 
     return results

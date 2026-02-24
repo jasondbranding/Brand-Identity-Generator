@@ -61,25 +61,42 @@ class BrandDirection(BaseModel):
     background_prompt: str = Field(
         description=(
             "Gemini image generation prompt for the atmospheric background scene. "
+            "MUST be 2-3 detailed sentences, minimum 40 words describing a specific scene or abstraction. "
             "NO text, NO logos, NO words of any kind in the image. "
-            "Describe: mood, color palette in use, texture, lighting quality, abstract or environmental composition. "
-            "Should feel like the emotional world of the brand. Minimum 60 words."
+            "Describe: exact mood, specific colors from the palette (use hex codes), texture, lighting quality "
+            "(e.g. 'soft diffused light', 'dramatic side-lit'), and abstract or environmental composition. "
+            "Should feel like the emotional world of the brand. "
+            "Example: 'A misty mountain landscape at twilight in deep slate #2C3E50 and warm amber #F39C12, "
+            "with soft volumetric light rays cutting through atmospheric haze, subtle grain texture, "
+            "no focal point, horizontal panoramic composition evoking quiet confidence.'"
         )
     )
     logo_prompt: str = Field(
         description=(
             "Gemini image generation prompt for the logo concept mark. "
+            "MUST be 3-4 detailed sentences, minimum 60 words describing exact visual forms. "
             "A single abstract symbol or geometric mark on a plain white background. "
             "NO text, NO letterforms, NO words — only the visual mark itself. "
-            "Describe the exact shape, form language, line weight, and visual metaphor. Minimum 40 words."
+            "Describe: exact shape geometry (e.g. 'equilateral triangle with rounded corners'), "
+            "line weight (hairline/medium/bold), fill vs outline, visual metaphor, and color. "
+            "Example: 'A single bold circular mark formed by two overlapping arcs in deep navy #1A2B4C, "
+            "each arc 8px stroke weight, creating a subtle lens shape at their intersection in lighter blue #4A90D9. "
+            "The form suggests a lens aperture and precision optics. Clean vector rendering, "
+            "centered with 25% padding on all sides, pure white background, no shadow or gradient.'"
         )
     )
     pattern_prompt: str = Field(
         description=(
             "Gemini image generation prompt for a seamless brand pattern or texture tile. "
+            "MUST be 2-3 detailed sentences, minimum 40 words with specific hex color codes from the palette. "
             "NO text, NO logos. "
-            "Describe: motif type (geometric, organic, abstract), density, colors from the palette, "
-            "scale, and mood. Should work as a background or surface texture. Minimum 40 words."
+            "Describe: exact motif type (e.g. 'isometric dot grid', 'overlapping hexagons', "
+            "'flowing organic curves'), spacing/density (e.g. '20px gaps between elements'), "
+            "colors with hex codes, scale, and mood. Should work as a background or surface texture. "
+            "Example: 'A dense repeating pattern of small equilateral triangles in alternating "
+            "deep navy #1A2B4C and warm white #F5F0E8, each triangle 12px per side with 2px gaps, "
+            "creating a subtle optical vibration. Flat vector style, seamless tile, "
+            "professional textile quality suggesting precision and structure.'"
         )
     )
 
@@ -135,6 +152,38 @@ pattern_prompt: Brief a surface designer on a repeating tile.
 - Specify the motif (chevron, dot grid, organic cells, flowing lines, etc.)
 - Colors drawn directly from the palette, exact density and scale
 - Mood should match the direction's personality
+
+## IMAGE PROMPT QUALITY GUIDELINES — CRITICAL
+
+The image prompts you generate are fed directly to an AI image generator. Vague prompts produce generic, unusable images. Specific, detailed prompts produce high-quality brand assets.
+
+### LOGO PROMPT — Required elements:
+✓ GOOD: "A single bold mark formed by three concentric circles in deep cobalt #0A3D91, each ring with increasing stroke weight (2px/4px/6px), creating a target-like form suggesting focus and precision. The outermost circle is 80% of the canvas width. Clean vector rendering on pure white background, centered with 20% padding, no shadow."
+✗ BAD: "A circular logo representing technology and innovation"
+
+✓ GOOD: "An asymmetric leaf form split diagonally — left half in forest green #2D6A4F solid fill, right half as an outline-only stroke in the same green, 3px weight. The leaf tilts 15° clockwise, suggesting dynamic growth. Minimalist botanical style, single element centered on white."
+✗ BAD: "A nature-inspired logo with green colors"
+
+### PATTERN PROMPT — Required elements:
+✓ GOOD: "A seamless repeating grid of small diamond shapes in warm terracotta #C9614A on cream #F5EDE0, each diamond 16×10px with 8px gutters, rotated 45°. Every third diamond is hollow (outline only, 1.5px stroke). Creates a refined textile feel reminiscent of high-end stationery. Flat vector, zero noise."
+✗ BAD: "A geometric pattern with warm colors"
+
+✓ GOOD: "Overlapping circles of varying sizes (24px to 48px diameter) in translucent layers — midnight blue #0D1B2A at 60% opacity and electric cyan #00D4FF at 40% opacity. 6px gaps between circle edges. The overlapping intersections create darker accent zones. Seamless tile, contemporary tech aesthetic."
+✗ BAD: "Abstract circles in brand colors"
+
+### BACKGROUND PROMPT — Required elements:
+✓ GOOD: "A wide cinematic landscape at golden hour: rolling desert dunes in warm ochre #C8972A fading to deep rust #8B2500 at the horizon, with a single shaft of amber light cutting diagonally across the frame. Soft atmospheric haze reduces contrast at distance. Ultra-wide 16:9 format, photorealistic rendering, no focal subjects."
+✗ BAD: "A warm desert background with golden light"
+
+✓ GOOD: "Abstract macro texture of brushed aluminum in cool silver #C0C0C0 and anthracite #2A2A2A, lit from the left with hard directional light creating deep parallel grooves and specular highlights. The texture fills the entire frame edge-to-edge. Photographic quality, slight depth of field blur at the far right."
+✗ BAD: "A metallic texture background"
+
+### Universal rules for ALL prompts:
+1. Include exact hex color codes from the palette
+2. Specify exact sizes, weights, proportions where applicable
+3. Name the visual style explicitly (vector, photorealistic, digital painting, etc.)
+4. Say "absolutely no text, no words, no letters, no typography anywhere"
+5. Minimum word counts: logo_prompt ≥60 words, pattern_prompt ≥40 words, background_prompt ≥40 words
 """
 
 
@@ -143,6 +192,7 @@ pattern_prompt: Brief a surface designer on a repeating tile.
 def generate_directions(
     brief: BriefData,
     refinement_feedback: Optional[str] = None,
+    research_context: str = "",
 ) -> BrandDirectionsOutput:
     """
     Call Gemini to analyze the brief and generate brand identity directions.
@@ -150,6 +200,7 @@ def generate_directions(
     Args:
         brief: Parsed brief data
         refinement_feedback: Optional human feedback for remix/adjust iterations
+        research_context: Optional market research context from BrandResearcher
 
     Returns:
         Structured BrandDirectionsOutput with 4 directions
@@ -157,6 +208,9 @@ def generate_directions(
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
     user_message = brief.to_prompt_block()
+
+    if research_context:
+        user_message += f"\n\n---\n\n{research_context}"
 
     if refinement_feedback:
         user_message += (
