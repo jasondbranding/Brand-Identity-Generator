@@ -217,23 +217,27 @@ def _generate_image(
         if label == "logo" and brief_keywords:
             ref_images = _get_reference_images(brief_keywords, "logos")
             if ref_images:
-                parts = [types.Part.from_text(full_prompt)]
+                parts = [types.Part.from_text(text=full_prompt)]
                 for ref_path in ref_images[:3]:
                     try:
                         img_bytes = ref_path.read_bytes()
                         ext = ref_path.suffix.lower().lstrip(".")
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
                         parts.append(types.Part.from_text(
-                            "Style reference image (study the quality level and aesthetic approach, "
-                            "do NOT copy this design — create something entirely original):"
+                            text=(
+                                "Style reference image (study the quality level and aesthetic approach, "
+                                "do NOT copy this design — create something entirely original):"
+                            )
                         ))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
                     except Exception:
                         pass
                 if len(parts) > 1:
                     parts.append(types.Part.from_text(
-                        "Now generate the new logo described above. "
-                        "Create an entirely original design inspired by the quality level."
+                        text=(
+                            "Now generate the new logo described above. "
+                            "Create an entirely original design inspired by the quality level."
+                        )
                     ))
                     contents = parts
                     console.print(
