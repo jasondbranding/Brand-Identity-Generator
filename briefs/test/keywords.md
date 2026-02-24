@@ -1,0 +1,7 @@
+- Institutional-grade
+- Crypto-native
+- Bold and confident
+- Deep liquidity
+- Forward-looking
+- Premium minimal
+- Trust through transparency

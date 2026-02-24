@@ -1,0 +1,194 @@
+{
+  "app_Icon_phone_flat.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/app_Icon_phone_flat.png",
+    "processed_path": "mockups/processed/app_Icon_phone_flat.jpg",
+    "text_area": [
+      296,
+      414,
+      296,
+      416
+    ]
+  },
+  "employee_id_card.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/employee_id_card.png",
+    "processed_path": "mockups/processed/employee_id_card.jpg",
+    "text_area": [
+      332,
+      331,
+      597,
+      353
+    ]
+  },
+  "horizontal_billboard.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/horizontal_billboard.png",
+    "processed_path": "mockups/processed/horizontal_billboard.jpg",
+    "text_area": [
+      197,
+      122,
+      853,
+      480
+    ]
+  },
+  "logo_transparent_disk.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/logo_transparent_disk.png",
+    "processed_path": "mockups/processed/logo_transparent_disk.jpg"
+  },
+  "name_card.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/name_card.png",
+    "processed_path": "mockups/processed/name_card.jpg",
+    "text_area": [
+      507,
+      295,
+      865,
+      442
+    ]
+  },
+  "tote_bag.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/tote_bag.png",
+    "processed_path": "mockups/processed/tote_bag.jpg",
+    "logo_area": [
+      49,
+      243,
+      969,
+      840
+    ]
+  },
+  "wall_logo.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/wall_logo.png",
+    "processed_path": "mockups/processed/wall_logo.jpg",
+    "text_area": [
+      110,
+      96,
+      442,
+      657
+    ]
+  },
+  "x_account.jpg": {
+    "has_transparent_bg": false,
+    "transparent_path": "mockups/transparent/x_account.png",
+    "processed_path": "mockups/processed/x_account.jpg",
+    "text_area": [
+      252,
+      635,
+      658,
+      723
+    ]
+  },
+  "app_Icon_phone_flat_processed.png": {
+    "logo_area": {
+      "x": 746,
+      "y": 940,
+      "w": 355,
+      "h": 356
+    },
+    "text_area": {
+      "x": 747,
+      "y": 1359,
+      "w": 354,
+      "h": 93
+    }
+  },
+  "black_shirt_logo_processed.png": {
+    "logo_area": {
+      "x": 1177,
+      "y": 1323,
+      "w": 491,
+      "h": 296
+    }
+  },
+  "employee_id_card_processed.png": {
+    "logo_area": {
+      "x": 755,
+      "y": 786,
+      "w": 298,
+      "h": 69
+    }
+  },
+  "horizontal_billboard_processed.png": {
+    "logo_area": {
+      "x": 1034,
+      "y": 470,
+      "w": 494,
+      "h": 567
+    },
+    "surface_area": {
+      "x": 483,
+      "y": 313,
+      "w": 1611,
+      "h": 882
+    }
+  },
+  "logo_transparent_disk_processed.png": {
+    "logo_area": {
+      "x": 651,
+      "y": 471,
+      "w": 265,
+      "h": 166
+    }
+  },
+  "name_card_processed.png": {
+    "logo_area": {
+      "x": 401,
+      "y": 801,
+      "w": 1634,
+      "h": 245
+    },
+    "surface_area": {
+      "x": 1260,
+      "y": 663,
+      "w": 1001,
+      "h": 570
+    }
+  },
+  "tote_bag_processed.jpg": {
+    "logo_area": {
+      "x": 392,
+      "y": 492,
+      "w": 297,
+      "h": 202
+    }
+  },
+  "tshirt_processed.png": {
+    "logo_area": {
+      "x": 724,
+      "y": 843,
+      "w": 434,
+      "h": 252
+    }
+  },
+  "wall_logo_processed.png": {
+    "logo_area": {
+      "x": 363,
+      "y": 879,
+      "w": 729,
+      "h": 776
+    }
+  },
+  "x_account_processed.png": {
+    "logo_area": {
+      "x": 544,
+      "y": 1059,
+      "w": 244,
+      "h": 243
+    },
+    "text_area": {
+      "x": 543,
+      "y": 1331,
+      "w": 300,
+      "h": 97
+    },
+    "surface_area": {
+      "x": 474,
+      "y": 563,
+      "w": 1007,
+      "h": 613
+    }
+  }
+}

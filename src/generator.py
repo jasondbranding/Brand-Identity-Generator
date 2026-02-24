@@ -14,9 +14,9 @@ from __future__ import annotations
 import base64
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from google import genai
 from google.genai import types
@@ -30,9 +30,10 @@ console = Console()
 @dataclass
 class DirectionAssets:
     direction: BrandDirection
-    background: Optional[Path]   # 1536x864 atmospheric scene
-    logo: Optional[Path]         # 800x800 logo concept mark
-    pattern: Optional[Path]      # 800x800 brand pattern tile
+    background: Optional[Path]            # 1536x864 atmospheric scene
+    logo: Optional[Path]                  # 800x800 logo concept mark
+    pattern: Optional[Path]               # 800x800 brand pattern tile
+    mockups: Optional[List[Path]] = field(default=None)  # composited mockup images
 
 
 def generate_all_assets(

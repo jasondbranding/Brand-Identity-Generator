@@ -12,20 +12,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
+from google import genai
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.rule import Rule
 
 from .parser import parse_brief
-from .director import BrandDirectionsOutput, generate_directions, display_directions
+from .director import BrandDirection, BrandDirectionsOutput, generate_directions, display_directions
 from .generator import generate_all_assets
+from .mockup_compositor import composite_all_mockups
 from .compositor import build_all_stylescapes
 
 load_dotenv()
@@ -103,6 +107,139 @@ def save_directions_json(output: BrandDirectionsOutput, output_dir: Path) -> Pat
     return json_path
 
 
+# ── Intent classifier ─────────────────────────────────────────────────────────
+
+def _parse_classification(
+    raw: str,
+    directions: List[BrandDirection],
+) -> Tuple[str, object]:
+    """
+    Parse a single-line Gemini classification response.
+    Returns one of:
+      ("SELECT", int)    — option number to confirm
+      ("REMIX",  str)    — instructions to remix
+      ("ADJUST", str)    — instructions to adjust
+      ("QUIT",   None)
+    """
+    line = raw.strip().split("\n")[0].strip()
+    upper = line.upper()
+
+    if upper == "QUIT":
+        return ("QUIT", None)
+
+    if upper.startswith("SELECT:"):
+        try:
+            num = int(line.split(":", 1)[1].strip())
+            valid = {d.option_number for d in directions}
+            if num in valid:
+                return ("SELECT", num)
+        except (ValueError, IndexError):
+            pass
+
+    if upper.startswith("REMIX:"):
+        instructions = line.split(":", 1)[1].strip()
+        return ("REMIX", instructions or "Remix directions")
+
+    if upper.startswith("ADJUST:"):
+        instructions = line.split(":", 1)[1].strip()
+        return ("ADJUST", instructions or "Adjust direction")
+
+    # Gemini returned something unexpected — treat whole response as ADJUST
+    return ("ADJUST", raw[:400])
+
+
+def _gemini_classify(
+    user_input: str,
+    directions: List[BrandDirection],
+) -> Tuple[str, object]:
+    """Call gemini-2.5-flash to classify free-form user feedback."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return ("ADJUST", user_input)
+
+    direction_list = "\n".join(
+        f"  Option {d.option_number}: {d.direction_name}" for d in directions
+    )
+
+    prompt = f"""\
+Classify this user feedback about brand identity directions into exactly one of these formats:
+
+SELECT:<number>        — user wants to confirm/finalize a specific direction
+REMIX:<instructions>   — user wants to combine elements from multiple directions
+ADJUST:<instructions>  — user wants to modify or refine one direction
+QUIT                   — user wants to exit without selecting
+
+Available directions:
+{direction_list}
+
+User said: "{user_input}"
+
+Rules:
+- If the user is satisfied with one direction and wants to proceed → SELECT
+- If the user mentions combining/mixing/taking from multiple options → REMIX
+- If the user wants changes to a direction → ADJUST
+- If the user says quit/exit/stop/no → QUIT
+- For ADJUST/REMIX, rephrase the instruction clearly in English
+
+Respond with ONLY the classification on a single line. Examples:
+SELECT:2
+ADJUST:Option 1 but with warmer colors and less blue in the palette
+REMIX:Take the color palette from Option 1 and the typography from Option 3
+QUIT"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        raw = (response.text or "").strip()
+        return _parse_classification(raw, directions)
+    except Exception as exc:
+        console.print(f"  [yellow]⚠ Gemini classify failed ({exc}) — treating as ADJUST[/yellow]")
+        return ("ADJUST", user_input)
+
+
+def _classify_intent(
+    user_input: str,
+    directions: List[BrandDirection],
+) -> Tuple[str, object]:
+    """
+    Classify free-form user input without always hitting the API.
+
+    1. Fast string-matching for obvious patterns.
+    2. Gemini fallback for everything else.
+    """
+    text = user_input.strip()
+    lower = text.lower()
+
+    # ── Hard exits ────────────────────────────────────────────────────────────
+    if lower in {"q", "quit", "exit", "thoát", "thoat", "bye"}:
+        return ("QUIT", None)
+
+    # ── Explicit select patterns ───────────────────────────────────────────────
+    select_pats = [
+        r"(?:select|choose|confirm|go\s+with|finalize|pick|use|take|chọn|xác\s+nhận)\s+(?:option\s*)?(\d+)",
+        r"(?:option|opt)\s*(\d+)\s+(?:is\s+)?(?:good|great|perfect|ok|fine|looks?\s+good|tốt|ổn)",
+        r"^(?:option\s*)?(\d+)$",   # bare number "2" or "option 2"
+        r"^done\s*(\d+)$",          # "done 3"
+    ]
+    valid_nums = {d.option_number for d in directions}
+    for pat in select_pats:
+        m = re.search(pat, lower)
+        if m:
+            try:
+                num = int(m.group(1))
+                if num in valid_nums:
+                    return ("SELECT", num)
+            except (ValueError, IndexError):
+                pass
+
+    # ── "done" / "perfect" with no number → Gemini to disambiguate ───────────
+    # Fall through to Gemini for everything else
+    return _gemini_classify(user_input, directions)
+
+
 # ── Human-in-the-loop ─────────────────────────────────────────────────────────
 
 def refinement_loop(
@@ -112,37 +249,59 @@ def refinement_loop(
     generate_imgs: bool,
 ) -> BrandDirectionsOutput:
     """
-    Interactive refinement loop after Phase 1 stylescape review.
+    Interactive refinement loop with free-form natural language input.
 
-    Options:
-      s  — Select a direction (confirm it)
-      r  — Remix (e.g. "Take color from Option 1, typography from Option 3")
-      a  — Adjust (e.g. "Option 2 but less corporate")
-      q  — Quit
+    User can type anything in English or Vietnamese. Intent is classified
+    by fast string matching first, then Gemini as fallback, into:
+      SELECT — confirm a direction
+      REMIX  — combine elements from multiple directions
+      ADJUST — modify a direction
+      QUIT   — exit
     """
     current_output = initial_output
     iteration = 0
 
     while True:
         console.print(Rule("[bold]Human-in-the-Loop — Phase 1 Review[/bold]"))
+
+        opts = "  ".join(
+            f"[bold cyan]{d.option_number}[/bold cyan] {d.direction_name}"
+            for d in current_output.directions
+        )
+        console.print(f"\n  Directions: {opts}\n")
         console.print(
-            "\nWhat would you like to do?\n"
-            "  [bold]s[/bold] — Select a direction\n"
-            "  [bold]r[/bold] — Remix directions (combine elements)\n"
-            "  [bold]a[/bold] — Adjust a direction\n"
-            "  [bold]q[/bold] — Quit\n"
+            "  [dim]Describe what you want, e.g.:\n"
+            "    'Option 2 looks good but make the palette warmer'\n"
+            "    'Mix the logo style from 1 with the colors from 3'\n"
+            "    'go with option 2' / 'chọn option 1' / 'quit'[/dim]\n"
         )
 
-        action = Prompt.ask("Action", choices=["s", "r", "a", "q"], default="s")
+        user_input = Prompt.ask("💬 Your feedback").strip()
+        if not user_input:
+            continue
 
-        if action == "q":
+        console.print("  [dim]→ Classifying...[/dim] ", end="")
+        intent, payload = _classify_intent(user_input, current_output.directions)
+        console.print(f"[bold]{intent}[/bold]" + (f": {payload}" if payload else ""))
+
+        # ── QUIT ──────────────────────────────────────────────────────────────
+        if intent == "QUIT":
             console.print("[dim]Exiting without selection.[/dim]")
             break
 
-        elif action == "s":
-            nums = [str(d.option_number) for d in current_output.directions]
-            choice = Prompt.ask(f"Select direction", choices=nums)
-            selected = next(d for d in current_output.directions if str(d.option_number) == choice)
+        # ── SELECT ────────────────────────────────────────────────────────────
+        elif intent == "SELECT":
+            option_number = int(payload)
+            selected = next(
+                (d for d in current_output.directions if d.option_number == option_number),
+                None,
+            )
+            if selected is None:
+                console.print(
+                    f"  [yellow]⚠ Option {option_number} not found. "
+                    f"Available: {[d.option_number for d in current_output.directions]}[/yellow]"
+                )
+                continue
             console.print(
                 Panel(
                     f"[bold green]✓ Direction confirmed:[/bold green] "
@@ -155,24 +314,19 @@ def refinement_loop(
             _save_selection(selected, output_dir)
             break
 
-        elif action in ("r", "a"):
-            label = "Remix instructions" if action == "r" else "Adjustment instructions"
-            hint = (
-                "e.g. 'Take the color palette from Option 1, typography from Option 3'"
-                if action == "r"
-                else "e.g. 'Option 2 but warmer and less corporate'"
-            )
-            console.print(f"[dim]{hint}[/dim]")
-            feedback = Prompt.ask(label)
-
-            if not feedback.strip():
-                continue
+        # ── REMIX / ADJUST ────────────────────────────────────────────────────
+        elif intent in ("REMIX", "ADJUST"):
+            instructions = str(payload)
+            label = "Remix" if intent == "REMIX" else "Adjust"
+            console.print(f"\n[bold cyan]→ {label}: {instructions}[/bold cyan]")
 
             iteration += 1
-            console.print(f"\n[bold cyan]→ Regenerating directions (iteration {iteration})...[/bold cyan]")
+            console.print(
+                f"[bold cyan]→ Regenerating directions (iteration {iteration})...[/bold cyan]"
+            )
 
             t0 = time.time()
-            current_output = generate_directions(brief, refinement_feedback=feedback)
+            current_output = generate_directions(brief, refinement_feedback=instructions)
             console.print(f"  [green]✓ Directions in {time.time() - t0:.1f}s[/green]\n")
 
             display_directions(current_output)
@@ -181,17 +335,28 @@ def refinement_loop(
 
             if generate_imgs:
                 iter_dir = output_dir / f"iteration_{iteration}"
+
                 t1 = time.time()
                 all_assets = generate_all_assets(
                     current_output.directions, output_dir=iter_dir
                 )
                 console.print(f"  [green]✓ Images in {time.time() - t1:.1f}s[/green]")
 
+                t_mock = time.time()
+                mockup_results = composite_all_mockups(all_assets)
+                for num, composited in mockup_results.items():
+                    all_assets[num].mockups = composited
+                console.print(f"  [green]✓ Mockups in {time.time() - t_mock:.1f}s[/green]")
+
                 t2 = time.time()
                 stylescape_paths = build_all_stylescapes(all_assets, output_dir=iter_dir)
                 console.print(f"  [green]✓ Stylescapes in {time.time() - t2:.1f}s[/green]")
                 for num, path in stylescape_paths.items():
                     console.print(f"    Option {num}: {path}")
+
+        # ── Unknown (shouldn't happen, but be safe) ───────────────────────────
+        else:
+            console.print("  [yellow]⚠ Could not understand intent — please rephrase.[/yellow]")
 
     return current_output
 
@@ -225,12 +390,12 @@ def main() -> None:
     )
 
     # ── Step 1: Parse brief ──────────────────────────────────────────────────
-    console.print("\n[bold]Step 1/3 — Parsing brief[/bold]")
+    console.print("\n[bold]Step 1/4 — Parsing brief[/bold]")
     brief = parse_brief(args.brief, mode=args.mode)
     console.print(f"  [green]✓[/green] Loaded brief ({args.mode} mode, {len(brief.keywords)} keywords)")
 
     # ── Step 2: Generate directions via Gemini ───────────────────────────────
-    console.print("\n[bold]Step 2/3 — Generating brand directions (Gemini)[/bold]")
+    console.print("\n[bold]Step 2/4 — Generating brand directions (Gemini)[/bold]")
     t0 = time.time()
     directions_output = generate_directions(brief)
     console.print(f"  [green]✓ Done in {time.time() - t0:.1f}s[/green]")
@@ -241,10 +406,10 @@ def main() -> None:
     json_path = save_directions_json(directions_output, output_dir)
     console.print(f"\n  [dim]Saved: {md_path}  |  {json_path}[/dim]")
 
-    # ── Step 3: Generate images + assemble stylescapes ───────────────────────
+    # ── Step 3: Generate images ───────────────────────────────────────────────
     stylescape_paths: dict = {}
     if not args.no_images:
-        console.print("\n[bold]Step 3/3 — Generating images + assembling stylescapes (Gemini + Pillow)[/bold]")
+        console.print("\n[bold]Step 3/4 — Generating images (Gemini)[/bold]")
 
         t1 = time.time()
         all_assets = generate_all_assets(
@@ -255,6 +420,20 @@ def main() -> None:
                       f"{sum(1 for a in all_assets.values() if a.pattern)} pattern(s) — "
                       f"{time.time() - t1:.1f}s[/green]")
 
+        # ── Step 3b: Composite mockups ────────────────────────────────────────
+        console.print("\n[bold]Step 3b/4 — Compositing mockups (Pillow)[/bold]")
+        t_mock = time.time()
+        mockup_results = composite_all_mockups(all_assets)
+        for num, composited in mockup_results.items():
+            all_assets[num].mockups = composited
+        n_mockups = sum(len(v) for v in mockup_results.values())
+        console.print(
+            f"  [green]✓ {n_mockups} composited mockup(s) across "
+            f"{len(mockup_results)} direction(s) — {time.time() - t_mock:.1f}s[/green]"
+        )
+
+        # ── Step 4: Assemble stylescapes ──────────────────────────────────────
+        console.print("\n[bold]Step 4/4 — Assembling stylescapes (Pillow)[/bold]")
         t2 = time.time()
         stylescape_paths = build_all_stylescapes(all_assets, output_dir=output_dir)
         console.print(f"  [green]✓ {len(stylescape_paths)} stylescape(s) assembled — {time.time() - t2:.1f}s[/green]")

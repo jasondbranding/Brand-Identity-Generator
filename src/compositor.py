@@ -1,57 +1,110 @@
 """
-Compositor — assembles the final stylescape PNG using Pillow.
+Compositor — assembles the final 4000×2800 stylescape PNG using Pillow.
 
-Pipeline per direction:
-  1. build_phone_mockup()   — logo + pattern applied onto a drawn phone frame
-  2. build_card_mockup()    — logo applied onto a brand-colored card
-  3. build_typo_panel()     — typography specimen panel
-  4. assemble_stylescape()  — combines all zones into 2400×1440 final PNG
+14-cell grid layout (absolute positioning, dark #0a0a0a background):
 
-Canvas layout (2400 × 1440):
-  ┌──────────────────────────┬─────────────────┐  ← row 1: 960px tall
-  │  BACKGROUND (1500×960)   │  INFO (900×960) │
-  │  Gemini scene            │  title          │
-  │                          │  swatches       │
-  │                          │  logo           │
-  ├──────────────────────────┴─────────────────┤  ← row 2: 480px tall
-  │ PHONE (800×480) │ CARD (800×480) │ TYPO (800×480) │
-  └─────────────────┴────────────────┴───────────────┘
+  ┌────────┬────────┬────────┬──────────────┐  Row 1  h=660
+  │ mock 0 │ mock 1 │ mock 2 │   mock 3     │  3 small + 1 large
+  ├──────────────┬──────────────────┬────────┤  Row 2  h=740
+  │   mock 4     │  ★ LOGO CENTER ★ │ mock 5 │  logo prominently centered
+  ├────────┬─────┴─────┬────────────┤────────┤  Row 3  h=660
+  │ mock 6 │  PALETTE  │  PATTERN   │ mock 7 │
+  ├─────────────────────────────────┬────────┤  Row 4  h=642
+  │    DIRECTION INFO (wide)        │  m8 m9 │
+  └─────────────────────────────────┴────────┘
+
+Canvas: 4000 × 2800  |  Margin: 28px  |  Gap: 14px  |  Border-radius: 16px
 """
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from .director import BrandDirection, ColorSwatch
 from .generator import DirectionAssets
 
-# ── Canvas dimensions ─────────────────────────────────────────────────────────
-W, H         = 2400, 1440
-ROW1_H       = 960
-ROW2_H       = H - ROW1_H          # 480
-BG_W         = 1500
-INFO_W       = W - BG_W            # 900
-ZONE_W       = W // 3              # 800 each
+# ── Canvas geometry ───────────────────────────────────────────────────────────
 
-PAD          = 40   # general padding
+CANVAS_W  = 4000
+CANVAS_H  = 2800
+MARGIN    = 28
+GAP       = 14
+RADIUS    = 16
+BG_COLOR  = (10, 10, 10)
+
+# Row y-positions and heights  (verified: 28+660+14+740+14+660+14+642+28 = 2800)
+_ROW_Y = [28, 702, 1456, 2130]
+_ROW_H = [660, 740, 660, 642]
+
+# Inner width: 4000 - 2*28 = 3944
+_IW = CANVAS_W - 2 * MARGIN   # 3944
 
 
-# ── Font loading ──────────────────────────────────────────────────────────────
+def _grid() -> List[Tuple[str, int, int, int, int, Optional[int]]]:
+    """
+    Return list of (cell_type, x, y, w, h, mockup_slot_or_None).
 
-def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """Try macOS system fonts; fall back to Pillow default."""
-    candidates = [
+    Cell types: "mockup", "logo", "palette", "pattern", "info"
+    mockup_slot: index 0-9 for mockup cells, None for content cells.
+    """
+    # Row 1: 3 small + 1 large
+    # small = 867, large = 1301  →  3×867 + 3×14 + 1301 = 3944
+    sm, lg = 867, 1301
+    r1y, r1h = _ROW_Y[0], _ROW_H[0]
+    row1 = [
+        ("mockup", MARGIN,                  r1y, sm, r1h, 0),
+        ("mockup", MARGIN + sm + GAP,       r1y, sm, r1h, 1),
+        ("mockup", MARGIN + 2*(sm+GAP),     r1y, sm, r1h, 2),
+        ("mockup", MARGIN + 3*sm + 3*GAP,   r1y, lg, r1h, 3),
+    ]
+
+    # Row 2: side=1158, logo=1600  →  1158+14+1600+14+1158 = 3944
+    sd, lc = 1158, 1600
+    r2y, r2h = _ROW_Y[1], _ROW_H[1]
+    logo_x = MARGIN + sd + GAP
+    row2 = [
+        ("mockup", MARGIN,                       r2y, sd, r2h, 4),
+        ("logo",   logo_x,                       r2y, lc, r2h, None),
+        ("mockup", logo_x + lc + GAP,            r2y, sd, r2h, 5),
+    ]
+
+    # Row 3: 4 equal-ish  →  975+975+975+977 + 3×14 = 3944
+    q0, q1, q2, q3 = 975, 975, 975, 977
+    r3y, r3h = _ROW_Y[2], _ROW_H[2]
+    row3 = [
+        ("mockup",  MARGIN,                             r3y, q0, r3h, 6),
+        ("palette", MARGIN + q0 + GAP,                 r3y, q1, r3h, None),
+        ("pattern", MARGIN + q0 + q1 + 2*GAP,          r3y, q2, r3h, None),
+        ("mockup",  MARGIN + q0 + q1 + q2 + 3*GAP,    r3y, q3, r3h, 7),
+    ]
+
+    # Row 4: info=2000, sm=800, md=1116  →  2000+14+800+14+1116 = 3944
+    inf_w, sm2, md2 = 2000, 800, 1116
+    r4y, r4h = _ROW_Y[3], _ROW_H[3]
+    row4 = [
+        ("info",   MARGIN,                       r4y, inf_w, r4h, None),
+        ("mockup", MARGIN + inf_w + GAP,         r4y, sm2,   r4h, 8),
+        ("mockup", MARGIN + inf_w + sm2 + 2*GAP, r4y, md2,  r4h, 9),
+    ]
+
+    return row1 + row2 + row3 + row4   # 4 + 3 + 4 + 3 = 14 cells
+
+
+# ── Font helpers ─────────────────────────────────────────────────────────────
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont:
+    for path in [
         "/System/Library/Fonts/HelveticaNeue.ttc",
         "/System/Library/Fonts/Helvetica.ttc",
         "/Library/Fonts/Helvetica Neue.ttf",
         "/System/Library/Fonts/SFNS.ttf",
         "/System/Library/Fonts/SFNSDisplay.ttf",
-    ]
-    for path in candidates:
+    ]:
         try:
             return ImageFont.truetype(path, size)
         except Exception:
@@ -62,7 +115,7 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 def _hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
     h = hex_str.strip("#")
     if len(h) == 3:
-        h = h[0]*2 + h[1]*2 + h[2]*2
+        h = h[0] * 2 + h[1] * 2 + h[2] * 2
     try:
         return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     except ValueError:
@@ -73,330 +126,271 @@ def _brightness(rgb: Tuple[int, int, int]) -> float:
     return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
 
 
-def _contrasting_text(bg_rgb: Tuple[int, int, int]) -> Tuple[int, int, int]:
-    return (255, 255, 255) if _brightness(bg_rgb) < 128 else (20, 20, 20)
+def _contrasting_text(bg: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    return (255, 255, 255) if _brightness(bg) < 140 else (20, 20, 20)
 
 
-def _wrap_text(text: str, max_chars: int) -> List[str]:
+def _wrap_pixels(
+    text: str,
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.FreeTypeFont,
+    max_px: int,
+) -> List[str]:
+    """Word-wrap text to fit within max_px pixel width."""
     words = text.split()
     lines: List[str] = []
     current = ""
     for word in words:
-        if len(current) + len(word) + 1 <= max_chars:
-            current = (current + " " + word).strip()
+        test = (current + " " + word).strip()
+        try:
+            tb = draw.textbbox((0, 0), test, font=font)
+            tw = tb[2] - tb[0]
+        except Exception:
+            tw = len(test) * (font.size // 2)
+        if tw <= max_px:
+            current = test
         else:
             if current:
                 lines.append(current)
             current = word
     if current:
         lines.append(current)
-    return lines
+    return lines or [text]
 
 
-# ── Zone builders ─────────────────────────────────────────────────────────────
+# ── Image fitting ─────────────────────────────────────────────────────────────
 
-def _build_info_panel(direction: BrandDirection) -> Image.Image:
-    """900×960: direction title, type badge, rationale, swatches, logo thumbnail."""
-    # Background: brand primary color (darkened)
-    primary_rgb = _hex_to_rgb(direction.colors[0].hex)
-    # Darken significantly for panel bg
-    bg_rgb = tuple(max(0, int(c * 0.25)) for c in primary_rgb)
-    img = Image.new("RGB", (INFO_W, ROW1_H), bg_rgb)
-    draw = ImageDraw.Draw(img)
-
-    accent_rgb  = _hex_to_rgb(direction.colors[1].hex) if len(direction.colors) > 1 else (200, 200, 200)
-    text_color  = (240, 240, 240)
-    muted_color = (160, 160, 160)
-
-    y = PAD
-
-    # ── Direction name ────────────────────────────────────────────────────────
-    font_title = _load_font(52)
-    name = direction.direction_name.upper()
-    for line in _wrap_text(name, 22):
-        draw.text((PAD, y), line, fill=text_color, font=font_title)
-        y += 62
-    y += 8
-
-    # ── Option type badge ─────────────────────────────────────────────────────
-    font_badge = _load_font(22)
-    badge_text = f"  {direction.option_type.upper()}  "
-    bbox = draw.textbbox((PAD, y), badge_text, font=font_badge)
-    bw = bbox[2] - bbox[0] + 16
-    bh = bbox[3] - bbox[1] + 10
-    draw.rounded_rectangle([PAD, y, PAD + bw, y + bh], radius=6, fill=accent_rgb)
-    draw.text((PAD + 8, y + 5), badge_text.strip(), fill=_contrasting_text(accent_rgb), font=font_badge)
-    y += bh + 24
-
-    # ── Rationale ─────────────────────────────────────────────────────────────
-    font_body = _load_font(22)
-    for line in _wrap_text(direction.rationale, 46):
-        draw.text((PAD, y), line, fill=muted_color, font=font_body)
-        y += 28
-    y += 20
-
-    # ── Separator ─────────────────────────────────────────────────────────────
-    draw.line([(PAD, y), (INFO_W - PAD, y)], fill=(80, 80, 80), width=1)
-    y += 20
-
-    # ── Color swatches ────────────────────────────────────────────────────────
-    font_label = _load_font(18)
-    draw.text((PAD, y), "COLOR PALETTE", fill=muted_color, font=font_label)
-    y += 28
-
-    swatch_size = 44
-    swatch_gap  = 10
-    x = PAD
-    for swatch in direction.colors[:6]:
-        rgb = _hex_to_rgb(swatch.hex)
-        draw.rounded_rectangle([x, y, x + swatch_size, y + swatch_size], radius=6, fill=rgb)
-        # hex label below swatch
-        draw.text((x, y + swatch_size + 4), swatch.hex, fill=muted_color, font=_load_font(14))
-        x += swatch_size + swatch_gap
-    y += swatch_size + 28
-
-    # ── Separator ─────────────────────────────────────────────────────────────
-    draw.line([(PAD, y), (INFO_W - PAD, y)], fill=(80, 80, 80), width=1)
-    y += 20
-
-    # ── Logo concept text (no image in this panel — logo goes in main bg area) ─
-    draw.text((PAD, y), "LOGO CONCEPT", fill=muted_color, font=font_label)
-    y += 28
-    font_small = _load_font(20)
-    for line in _wrap_text(direction.logo_concept, 46):
-        draw.text((PAD, y), line, fill=(180, 180, 180), font=font_small)
-        y += 26
-
-    return img
+def _fit_cover(img: Image.Image, w: int, h: int) -> Image.Image:
+    """Resize to cover (w×h), center-crop the excess."""
+    iw, ih = img.size
+    scale = max(w / iw, h / ih)
+    nw = math.ceil(iw * scale)
+    nh = math.ceil(ih * scale)
+    img = img.resize((nw, nh), Image.LANCZOS)
+    cx = (nw - w) // 2
+    cy = (nh - h) // 2
+    return img.crop((cx, cy, cx + w, cy + h))
 
 
-def _build_background_zone(assets: DirectionAssets) -> Image.Image:
-    """1500×960: Gemini background scene, or gradient fallback."""
-    if assets.background and assets.background.stat().st_size > 100:
-        try:
-            img = Image.open(assets.background).convert("RGB")
-            return img.resize((BG_W, ROW1_H), Image.LANCZOS)
-        except Exception:
-            pass
-    # Fallback gradient from palette
-    return _make_gradient(BG_W, ROW1_H, assets.direction.colors)
+def _paste_rounded(
+    canvas: Image.Image,
+    cell_img: Image.Image,
+    x: int,
+    y: int,
+    radius: int = RADIUS,
+) -> None:
+    """Paste cell_img onto canvas at (x,y) with rounded-corner mask."""
+    w, h = cell_img.size
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, w - 1, h - 1], radius=radius, fill=255
+    )
+    canvas.paste(cell_img.convert("RGB"), (x, y), mask)
 
 
-def _make_gradient(w: int, h: int, colors: List[ColorSwatch]) -> Image.Image:
-    img = Image.new("RGB", (w, h))
-    draw = ImageDraw.Draw(img)
-    c1 = _hex_to_rgb(colors[0].hex)
-    c2 = _hex_to_rgb(colors[1].hex) if len(colors) > 1 else (20, 20, 30)
-    for x in range(w):
-        t = x / w
-        r = int(c1[0] + (c2[0] - c1[0]) * t)
-        g = int(c1[1] + (c2[1] - c1[1]) * t)
-        b = int(c1[2] + (c2[2] - c1[2]) * t)
-        draw.line([(x, 0), (x, h)], fill=(r, g, b))
-    return img
+# ── Cell builders ─────────────────────────────────────────────────────────────
+
+def _cell_mockup(path: Optional[Path], w: int, h: int) -> Image.Image:
+    """Mockup photo — cover-fit to fill cell."""
+    dark = Image.new("RGB", (w, h), (22, 22, 22))
+    if path is None or not path.exists():
+        return dark
+    try:
+        return _fit_cover(Image.open(path).convert("RGB"), w, h)
+    except Exception:
+        return dark
 
 
-def build_phone_mockup(assets: DirectionAssets) -> Image.Image:
-    """
-    800×480: phone frame with brand pattern on screen and logo centered.
-    """
-    W_Z, H_Z = ZONE_W, ROW2_H
-    bg_rgb = (15, 15, 20)
-    img = Image.new("RGB", (W_Z, H_Z), bg_rgb)
-    draw = ImageDraw.Draw(img)
-
-    # Phone body dimensions (centered in zone)
-    ph_w, ph_h = 200, 380
-    ph_x = (W_Z - ph_w) // 2
-    ph_y = (H_Z - ph_h) // 2
-
-    body_rgb = (40, 40, 48)
-    draw.rounded_rectangle([ph_x, ph_y, ph_x + ph_w, ph_y + ph_h],
-                            radius=28, fill=body_rgb)
-
-    # Screen area
-    scr_pad = 12
-    scr_x  = ph_x + scr_pad
-    scr_y  = ph_y + scr_pad + 18   # top notch offset
-    scr_w  = ph_w - scr_pad * 2
-    scr_h  = ph_h - scr_pad * 2 - 30
-
-    # Fill screen with pattern (or brand color)
+def _cell_logo(assets: DirectionAssets, w: int, h: int) -> Image.Image:
+    """Center cell — large logo + direction name, dark branded background."""
     primary_rgb = _hex_to_rgb(assets.direction.colors[0].hex)
-    screen_img = Image.new("RGB", (scr_w, scr_h), primary_rgb)
+    bg_rgb = tuple(max(0, int(c * 0.10)) for c in primary_rgb)
+    img = Image.new("RGB", (w, h), bg_rgb)
+    draw = ImageDraw.Draw(img)
 
-    if assets.pattern and assets.pattern.stat().st_size > 100:
-        try:
-            pat = Image.open(assets.pattern).convert("RGB")
-            pat = pat.resize((scr_w, scr_h), Image.LANCZOS)
-            # Blend pattern over primary color at 40% opacity
-            screen_img = Image.blend(screen_img, pat, alpha=0.4)
-        except Exception:
-            pass
+    PAD = 44
 
-    # Overlay logo centered on screen
-    if assets.logo and assets.logo.stat().st_size > 100:
+    # Option badge (top center)
+    font_opt = _load_font(22)
+    opt_text = f"OPTION  {assets.direction.option_number}"
+    try:
+        tb = draw.textbbox((0, 0), opt_text, font=font_opt)
+        tw = tb[2] - tb[0]
+    except Exception:
+        tw = len(opt_text) * 13
+    draw.text(((w - tw) // 2, 34), opt_text, fill=primary_rgb, font=font_opt)
+
+    # Logo zone: between opt badge and name label
+    name_reserve = 130
+    logo_zone_top = 88
+    logo_zone_h = h - logo_zone_top - name_reserve
+
+    if (
+        assets.logo
+        and assets.logo.exists()
+        and assets.logo.stat().st_size > 100
+    ):
         try:
             logo = Image.open(assets.logo).convert("RGBA")
-            logo_size = min(scr_w, scr_h) // 2
-            logo = logo.resize((logo_size, logo_size), Image.LANCZOS)
-            lx = (scr_w - logo_size) // 2
-            ly = (scr_h - logo_size) // 2
-            # White backing circle
-            backing = Image.new("RGBA", (logo_size, logo_size), (255, 255, 255, 200))
-            screen_img.paste(backing, (lx, ly), backing)
-            screen_img.paste(logo, (lx, ly), logo)
-        except Exception:
-            pass
-
-    img.paste(screen_img, (scr_x, scr_y))
-
-    # Notch
-    notch_rgb = (20, 20, 26)
-    draw.rounded_rectangle([ph_x + ph_w//2 - 28, ph_y + 8, ph_x + ph_w//2 + 28, ph_y + 22],
-                            radius=7, fill=notch_rgb)
-    # Home indicator
-    draw.rounded_rectangle([ph_x + ph_w//2 - 30, ph_y + ph_h - 18,
-                             ph_x + ph_w//2 + 30, ph_y + ph_h - 10],
-                            radius=4, fill=(80, 80, 88))
-    # Label
-    font = _load_font(18)
-    draw.text((W_Z // 2 - 50, H_Z - 28), "APP MOCKUP", fill=(100, 100, 110), font=font)
-
-    return img
-
-
-def build_card_mockup(assets: DirectionAssets) -> Image.Image:
-    """
-    800×480: business card with brand colors and logo.
-    """
-    W_Z, H_Z = ZONE_W, ROW2_H
-    bg_rgb = (20, 20, 26)
-    img = Image.new("RGB", (W_Z, H_Z), bg_rgb)
-    draw = ImageDraw.Draw(img)
-
-    card_w, card_h = 440, 260
-    card_x = (W_Z - card_w) // 2
-    card_y = (H_Z - card_h) // 2
-
-    primary_rgb = _hex_to_rgb(assets.direction.colors[0].hex)
-    accent_rgb  = _hex_to_rgb(assets.direction.colors[1].hex) if len(assets.direction.colors) > 1 else (200, 200, 200)
-
-    # Card body
-    draw.rounded_rectangle([card_x, card_y, card_x + card_w, card_y + card_h],
-                            radius=14, fill=primary_rgb)
-
-    # Accent strip at bottom
-    strip_h = 40
-    draw.rounded_rectangle([card_x, card_y + card_h - strip_h,
-                             card_x + card_w, card_y + card_h],
-                            radius=14, fill=accent_rgb)
-    # Mask off top corners of strip
-    draw.rectangle([card_x, card_y + card_h - strip_h,
-                    card_x + card_w, card_y + card_h - strip_h + 14],
-                   fill=accent_rgb)
-
-    # Pattern texture on card
-    if assets.pattern and assets.pattern.stat().st_size > 100:
-        try:
-            pat = Image.open(assets.pattern).convert("RGBA")
-            pat = pat.resize((card_w, card_h), Image.LANCZOS)
-            pat.putalpha(30)  # very subtle
-            card_canvas = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            card_canvas.paste(pat, (card_x, card_y))
-            img = img.convert("RGBA")
-            img.alpha_composite(card_canvas)
-            img = img.convert("RGB")
-            draw = ImageDraw.Draw(img)
-        except Exception:
-            pass
-
-    # Logo on card
-    if assets.logo and assets.logo.stat().st_size > 100:
-        try:
-            logo = Image.open(assets.logo).convert("RGBA")
-            logo_size = 80
-            logo = logo.resize((logo_size, logo_size), Image.LANCZOS)
-            lx = card_x + 24
-            ly = card_y + (card_h - strip_h - logo_size) // 2
+            lw, lh = logo.size
+            max_w = w - PAD * 2
+            scale = min(max_w / lw, logo_zone_h / lh) * 0.92
+            nw = max(1, int(lw * scale))
+            nh = max(1, int(lh * scale))
+            logo = logo.resize((nw, nh), Image.LANCZOS)
+            lx = (w - nw) // 2
+            ly = logo_zone_top + (logo_zone_h - nh) // 2
             img.paste(logo, (lx, ly), logo)
         except Exception:
             pass
+    draw = ImageDraw.Draw(img)
 
-    # Brand name text on card
-    text_color = _contrasting_text(primary_rgb)
-    font_name = _load_font(26)
-    font_small = _load_font(16)
-
-    # Extract brand name from direction name (first word or two)
-    brand_name = assets.direction.direction_name.upper()
-    tx = card_x + 120
-    ty = card_y + card_h // 2 - 28
-    draw.text((tx, ty), brand_name[:20], fill=text_color, font=font_name)
-    draw.text((tx, ty + 36), "Brand Identity", fill=_hex_to_rgb(
-        assets.direction.colors[2].hex if len(assets.direction.colors) > 2 else "#999999"
-    ), font=font_small)
-
-    font_label = _load_font(18)
-    draw.text((W_Z // 2 - 65, H_Z - 28), "BRAND CARD", fill=(100, 100, 110), font=font_label)
+    # Direction name (bottom)
+    font_name = _load_font(36)
+    name = assets.direction.direction_name.upper()
+    lines = _wrap_pixels(name, draw, font_name, w - PAD * 2)
+    ty = h - name_reserve + 16
+    for line in lines[:2]:
+        try:
+            tb = draw.textbbox((0, 0), line, font=font_name)
+            tw = tb[2] - tb[0]
+        except Exception:
+            tw = len(line) * 22
+        draw.text(((w - tw) // 2, ty), line, fill=(228, 228, 228), font=font_name)
+        ty += 50
 
     return img
 
 
-def build_typo_panel(direction: BrandDirection) -> Image.Image:
-    """
-    800×480: typography specimen showing primary + secondary type.
-    """
-    W_Z, H_Z = ZONE_W, ROW2_H
-
-    # Dark background
-    dark_rgb = (12, 12, 18)
-    img = Image.new("RGB", (W_Z, H_Z), dark_rgb)
+def _cell_palette(direction: BrandDirection, w: int, h: int) -> Image.Image:
+    """Color palette swatches with hex codes."""
+    img = Image.new("RGB", (w, h), (14, 14, 18))
     draw = ImageDraw.Draw(img)
 
-    accent_rgb   = _hex_to_rgb(direction.colors[1].hex) if len(direction.colors) > 1 else (180, 180, 180)
-    primary_rgb  = _hex_to_rgb(direction.colors[0].hex)
-    text_color   = (230, 230, 235)
-    muted        = (120, 120, 130)
+    PAD = 30
+    font_hdr = _load_font(20)
+    font_hex = _load_font(16)
+    font_name = _load_font(14)
 
+    draw.text((PAD, PAD), "COLOR  PALETTE", fill=(80, 80, 95), font=font_hdr)
+
+    colors = direction.colors[:6]
+    n = len(colors)
+    if n == 0:
+        return img
+
+    gap = 10
+    swatch_w = (w - 2 * PAD - (n - 1) * gap) // n
+    swatch_h = max(55, min(140, int((h - PAD - 80) * 0.55)))
+    sy = PAD + 44
+
+    for i, swatch in enumerate(colors):
+        rgb = _hex_to_rgb(swatch.hex)
+        sx = PAD + i * (swatch_w + gap)
+        draw.rounded_rectangle(
+            [sx, sy, sx + swatch_w, sy + swatch_h], radius=8, fill=rgb
+        )
+        draw.text((sx, sy + swatch_h + 8), swatch.hex.upper(),
+                  fill=(120, 120, 135), font=font_hex)
+        short = swatch.name[:13] if len(swatch.name) > 13 else swatch.name
+        draw.text((sx, sy + swatch_h + 26), short,
+                  fill=(70, 70, 82), font=font_name)
+
+    return img
+
+
+def _cell_pattern(assets: DirectionAssets, w: int, h: int) -> Image.Image:
+    """Brand pattern tile — fill cell, subtle label overlay."""
+    primary_rgb = _hex_to_rgb(assets.direction.colors[0].hex)
+    bg_rgb = tuple(max(0, int(c * 0.18)) for c in primary_rgb)
+    img = Image.new("RGB", (w, h), bg_rgb)
+
+    if (
+        assets.pattern
+        and assets.pattern.exists()
+        and assets.pattern.stat().st_size > 100
+    ):
+        try:
+            pat = Image.open(assets.pattern).convert("RGB")
+            pat_filled = _fit_cover(pat, w, h)
+            bg = Image.new("RGB", (w, h), bg_rgb)
+            img = Image.blend(bg, pat_filled, alpha=0.82)
+        except Exception:
+            pass
+
+    draw = ImageDraw.Draw(img)
+    draw.text((24, 24), "PATTERN", fill=(210, 210, 210), font=_load_font(20))
+    return img
+
+
+def _cell_info(direction: BrandDirection, w: int, h: int) -> Image.Image:
+    """Direction info — option badge, name, rationale, typography."""
+    primary_rgb = _hex_to_rgb(direction.colors[0].hex)
+    bg_rgb = tuple(max(0, int(c * 0.14)) for c in primary_rgb)
+    img = Image.new("RGB", (w, h), bg_rgb)
+    draw = ImageDraw.Draw(img)
+
+    PAD = 48
     y = PAD
 
-    # ── Primary font specimen ─────────────────────────────────────────────────
-    # Extract just the font name (before the colon/comma)
-    primary_name = re.split(r"[,:—]", direction.typography_primary)[0].strip()
-    font_label   = _load_font(16)
-    draw.text((PAD, y), "PRIMARY", fill=accent_rgb, font=font_label)
-    y += 24
+    # ── Option + type badge ───────────────────────────────────────────────────
+    accent_rgb = (
+        _hex_to_rgb(direction.colors[1].hex)
+        if len(direction.colors) > 1
+        else (130, 130, 145)
+    )
+    font_badge = _load_font(20)
+    badge_text = f"  OPTION {direction.option_number}  ·  {direction.option_type.upper()}  "
+    try:
+        tb = draw.textbbox((PAD, y), badge_text, font=font_badge)
+        bw = tb[2] - tb[0] + 22
+        bh = tb[3] - tb[1] + 12
+    except Exception:
+        bw, bh = 300, 34
+    draw.rounded_rectangle([PAD, y, PAD + bw, y + bh], radius=7, fill=accent_rgb)
+    draw.text(
+        (PAD + 11, y + 6),
+        badge_text.strip(),
+        fill=_contrasting_text(accent_rgb),
+        font=font_badge,
+    )
+    y += bh + 30
 
-    font_display = _load_font(64)
-    draw.text((PAD, y), "Aa Gg 01", fill=text_color, font=font_display)
-    y += 72
+    # ── Direction name ────────────────────────────────────────────────────────
+    font_title = _load_font(58)
+    name = direction.direction_name.upper()
+    for line in _wrap_pixels(name, draw, font_title, w - PAD * 2):
+        draw.text((PAD, y), line, fill=(238, 238, 238), font=font_title)
+        y += 70
+    y += 8
 
-    font_name_disp = _load_font(22)
-    draw.text((PAD, y), primary_name, fill=muted, font=font_name_disp)
-    y += 32
+    # ── Separator ─────────────────────────────────────────────────────────────
+    draw.line([(PAD, y), (w - PAD, y)], fill=(60, 60, 72), width=1)
+    y += 22
 
-    # Separator
-    draw.line([(PAD, y), (W_Z - PAD, y)], fill=(50, 50, 60), width=1)
-    y += 20
+    # ── Rationale ─────────────────────────────────────────────────────────────
+    font_body = _load_font(22)
+    max_body_w = w - PAD * 2
+    for line in _wrap_pixels(direction.rationale, draw, font_body, max_body_w):
+        if y + 30 > h - 90:
+            break
+        draw.text((PAD, y), line, fill=(155, 155, 168), font=font_body)
+        y += 30
+    y += 12
 
-    # ── Secondary font specimen ────────────────────────────────────────────────
-    secondary_name = re.split(r"[,:—]", direction.typography_secondary)[0].strip()
-    draw.text((PAD, y), "SECONDARY", fill=primary_rgb, font=font_label)
-    y += 24
-
-    font_body = _load_font(28)
-    draw.text((PAD, y), "The quick signal moves.", fill=(190, 190, 200), font=font_body)
-    y += 36
-    draw.text((PAD, y), "Human-first data design.", fill=(140, 140, 150), font=_load_font(22))
-    y += 32
-
-    font_sec_name = _load_font(20)
-    draw.text((PAD, y), secondary_name, fill=muted, font=font_sec_name)
-
-    # "TYPOGRAPHY" label at bottom
-    font_footer = _load_font(18)
-    draw.text((W_Z // 2 - 55, H_Z - 28), "TYPOGRAPHY", fill=(70, 70, 80), font=font_footer)
+    # ── Typography footer ─────────────────────────────────────────────────────
+    if y + 50 < h - PAD:
+        draw.line([(PAD, y), (w // 3, y)], fill=(45, 45, 58), width=1)
+        y += 16
+        font_small = _load_font(18)
+        primary_name = re.split(r"[,:—–]", direction.typography_primary)[0].strip()
+        secondary_name = re.split(r"[,:—–]", direction.typography_secondary)[0].strip()
+        draw.text(
+            (PAD, y),
+            f"TYPE  ·  {primary_name}  /  {secondary_name}",
+            fill=(90, 90, 105),
+            font=font_small,
+        )
 
     return img
 
@@ -408,51 +402,44 @@ def assemble_stylescape(
     output_dir: Path,
 ) -> Path:
     """
-    Compose all zones into the 2400×1440 stylescape PNG.
-    Returns path to saved stylescape.
+    Compose 14-cell stylescape grid and save as PNG.
+
+    Args:
+        assets:     DirectionAssets including .mockups list (up to 10 paths).
+        output_dir: Where to save the final stylescape PNG.
+
+    Returns:
+        Path to the saved stylescape PNG.
     """
-    canvas = Image.new("RGB", (W, H), (8, 8, 12))
+    canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), BG_COLOR)
 
-    # ── Row 1 ─────────────────────────────────────────────────────────────────
-    bg_zone   = _build_background_zone(assets)
-    info_zone = _build_info_panel(assets.direction)
-    canvas.paste(bg_zone,   (0, 0))
-    canvas.paste(info_zone, (BG_W, 0))
+    mockups = assets.mockups or []   # list of composited mockup paths
 
-    # ── Row 2 ─────────────────────────────────────────────────────────────────
-    phone_zone = build_phone_mockup(assets)
-    card_zone  = build_card_mockup(assets)
-    typo_zone  = build_typo_panel(assets.direction)
+    def _slot(idx: int) -> Optional[Path]:
+        return mockups[idx] if idx < len(mockups) else None
 
-    canvas.paste(phone_zone, (0,          ROW1_H))
-    canvas.paste(card_zone,  (ZONE_W,     ROW1_H))
-    canvas.paste(typo_zone,  (ZONE_W * 2, ROW1_H))
+    for cell in _grid():
+        ctype, cx, cy, cw, ch, slot = cell
 
-    # ── Thin separators ───────────────────────────────────────────────────────
-    draw = ImageDraw.Draw(canvas)
-    sep = (40, 40, 48)
-    draw.line([(BG_W, 0), (BG_W, ROW1_H)],           fill=sep, width=1)
-    draw.line([(0, ROW1_H), (W, ROW1_H)],             fill=sep, width=1)
-    draw.line([(ZONE_W, ROW1_H), (ZONE_W, H)],        fill=sep, width=1)
-    draw.line([(ZONE_W * 2, ROW1_H), (ZONE_W * 2, H)], fill=sep, width=1)
+        if ctype == "mockup":
+            cell_img = _cell_mockup(_slot(slot), cw, ch)
 
-    # ── Option logo image inset over background (top-right of bg zone) ────────
-    if assets.logo and assets.logo.stat().st_size > 100:
-        try:
-            logo = Image.open(assets.logo).convert("RGBA")
-            logo_size = 220
-            logo = logo.resize((logo_size, logo_size), Image.LANCZOS)
-            # Semi-transparent white pill behind logo for contrast
-            pill = Image.new("RGBA", (logo_size + 40, logo_size + 40), (255, 255, 255, 180))
-            lx = BG_W - logo_size - 60
-            ly = ROW1_H - logo_size - 60
-            canvas.paste(
-                Image.new("RGB", (logo_size + 40, logo_size + 40), (255, 255, 255)),
-                (lx - 20, ly - 20),
-            )
-            canvas.paste(logo, (lx, ly), logo)
-        except Exception:
-            pass
+        elif ctype == "logo":
+            cell_img = _cell_logo(assets, cw, ch)
+
+        elif ctype == "palette":
+            cell_img = _cell_palette(assets.direction, cw, ch)
+
+        elif ctype == "pattern":
+            cell_img = _cell_pattern(assets, cw, ch)
+
+        elif ctype == "info":
+            cell_img = _cell_info(assets.direction, cw, ch)
+
+        else:
+            cell_img = Image.new("RGB", (cw, ch), (30, 30, 30))
+
+        _paste_rounded(canvas, cell_img, cx, cy)
 
     slug = re.sub(r"[^a-z0-9]+", "_", assets.direction.direction_name.lower()).strip("_")[:30]
     out_path = output_dir / f"stylescape_{assets.direction.option_number}_{slug}.png"
@@ -470,21 +457,29 @@ def build_all_stylescapes(
     Build stylescapes for all directions.
 
     Args:
-        all_assets: Dict mapping option_number → DirectionAssets
-        output_dir: Where to save stylescape PNGs
+        all_assets: Dict mapping option_number → DirectionAssets.
+                    Each DirectionAssets.mockups should be populated before
+                    calling this (by composite_all_mockups in mockup_compositor).
+        output_dir: Where to save stylescape PNGs.
 
     Returns:
-        Dict mapping option_number → stylescape Path
+        Dict mapping option_number → stylescape Path.
     """
+    from rich.console import Console
+    console = Console()
+
     output_dir.mkdir(parents=True, exist_ok=True)
     stylescapes = {}
 
     for num, assets in all_assets.items():
-        from rich.console import Console
-        console = Console()
-        console.print(f"  [cyan]Compositing stylescape for Option {num}: {assets.direction.direction_name}...[/cyan]")
+        n_mockups = len(assets.mockups) if assets.mockups else 0
+        console.print(
+            f"  [cyan]Assembling stylescape  Option {num}: "
+            f"{assets.direction.direction_name}  "
+            f"({n_mockups} mockups)[/cyan]"
+        )
         path = assemble_stylescape(assets, output_dir)
         stylescapes[num] = path
-        console.print(f"  [green]✓ Saved → {path.name}[/green]")
+        console.print(f"  [green]✓[/green] → {path.name}")
 
     return stylescapes
