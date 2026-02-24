@@ -1130,7 +1130,7 @@ def _ai_reconstruct_mockup(
 
         # Build content parts
         parts = [
-            genai_types.Part.from_text(prompt),
+            genai_types.Part.from_text(text=prompt),
             genai_types.Part.from_bytes(data=mockup_bytes, mime_type=mockup_mime),
         ]
 
@@ -1138,16 +1138,20 @@ def _ai_reconstruct_mockup(
         if logo_path and logo_path.exists() and logo_path.stat().st_size > 100:
             logo_bytes = logo_path.read_bytes()
             parts.append(genai_types.Part.from_text(
-                "Brand logo mark (integrate this into all magenta zones, "
-                "render naturally on the material):"
+                text=(
+                    "Brand logo mark (integrate this into all magenta zones, "
+                    "render naturally on the material):"
+                )
             ))
             parts.append(genai_types.Part.from_bytes(
                 data=logo_bytes, mime_type="image/png"
             ))
 
         parts.append(genai_types.Part.from_text(
-            "Output the reconstructed mockup image with brand identity fully applied. "
-            "Image only — no captions."
+            text=(
+                "Output the reconstructed mockup image with brand identity fully applied. "
+                "Image only — no captions."
+            )
         ))
 
         response = client.models.generate_content(
