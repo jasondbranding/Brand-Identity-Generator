@@ -338,7 +338,9 @@ def refinement_loop(
 
                 t1 = time.time()
                 all_assets = generate_all_assets(
-                    current_output.directions, output_dir=iter_dir
+                    current_output.directions,
+                    output_dir=iter_dir,
+                    brand_name=brief.brand_name,
                 )
                 console.print(f"  [green]✓ Images in {time.time() - t1:.1f}s[/green]")
 
@@ -434,6 +436,7 @@ def main() -> None:
             directions_output.directions,
             output_dir=output_dir,
             brief_keywords=brief.keywords,
+            brand_name=brief.brand_name,
         )
         console.print(f"\n  [green]✓ {sum(1 for a in all_assets.values() if a.background)} background(s), "
                       f"{sum(1 for a in all_assets.values() if a.logo)} logo(s), "

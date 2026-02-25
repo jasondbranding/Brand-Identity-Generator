@@ -5,6 +5,7 @@ into a structured BriefData object for both Full and Quick modes.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
@@ -14,6 +15,7 @@ from typing import List
 class BriefData:
     mode: str               # "full" or "quick"
     brief_text: str         # Raw content of brief.md
+    brand_name: str         # Extracted from "## Brand Name" section
     keywords: List[str]     # Brand personality keywords
     moodboard_notes: str    # Moodboard/creative direction notes (full mode)
 
@@ -69,6 +71,21 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
 
     brief_text = brief_file.read_text(encoding="utf-8")
 
+    # Brand name — extract from "## Brand Name" section
+    brand_name = ""
+    _in_bn = False
+    for _line in brief_text.splitlines():
+        if re.match(r"##\s*brand\s*name", _line.strip(), re.IGNORECASE):
+            _in_bn = True
+            continue
+        if _in_bn:
+            if _line.startswith("#"):
+                break
+            _stripped = _line.strip()
+            if _stripped:
+                brand_name = _stripped
+                break
+
     # Keywords — optional file, also check inside brief for an inline ## Keywords section
     keywords: list[str] = []
     keywords_file = root / "keywords.md"
@@ -101,6 +118,7 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
     return BriefData(
         mode=mode,
         brief_text=brief_text,
+        brand_name=brand_name,
         keywords=keywords,
         moodboard_notes=moodboard_notes,
     )

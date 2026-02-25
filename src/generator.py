@@ -35,6 +35,7 @@ class DirectionAssets:
     background: Optional[Path]                                      # 1536x864 atmospheric scene
     logo: Optional[Path]                                            # 800x800 logo concept mark
     pattern: Optional[Path]                                         # 800x800 brand pattern tile
+    brand_name: str = ""                                            # actual brand name from brief
     mockups: Optional[List[Path]] = field(default=None)             # composited mockup images
     logo_white: Optional[Path] = field(default=None)                # white logo on transparent bg
     logo_black: Optional[Path] = field(default=None)                # dark logo on transparent bg
@@ -45,14 +46,16 @@ def generate_all_assets(
     directions: list,
     output_dir: Path,
     brief_keywords: Optional[list] = None,
+    brand_name: str = "",
 ) -> dict:
     """
     Generate bg + logo + pattern for every direction.
 
     Args:
-        directions: List of BrandDirection objects
-        output_dir: Directory to save assets
+        directions:    List of BrandDirection objects
+        output_dir:    Directory to save assets
         brief_keywords: Optional brand keywords for reference image matching
+        brand_name:    Actual brand name from the brief (e.g. "Whales Market")
 
     Returns:
         Dict mapping option_number → DirectionAssets
@@ -65,7 +68,11 @@ def generate_all_assets(
             f"\n[bold cyan]→ Generating assets for Option {direction.option_number}: "
             f"{direction.direction_name}[/bold cyan]"
         )
-        assets = _generate_direction_assets(direction, output_dir, brief_keywords=brief_keywords)
+        assets = _generate_direction_assets(
+            direction, output_dir,
+            brief_keywords=brief_keywords,
+            brand_name=brand_name,
+        )
         results[direction.option_number] = assets
 
     return results
@@ -75,6 +82,7 @@ def _generate_direction_assets(
     direction: BrandDirection,
     output_dir: Path,
     brief_keywords: Optional[list] = None,
+    brand_name: str = "",
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
@@ -109,6 +117,7 @@ def _generate_direction_assets(
 
     return DirectionAssets(
         direction=direction,
+        brand_name=brand_name,
         background=background,
         logo=logo,
         pattern=pattern,
@@ -262,10 +271,38 @@ def _generate_image(
                     console.print(f"  [green]✓ {label}[/green] (Gemini) → {save_path.name}")
                     return save_path
 
-        console.print(f"  [yellow]⚠ No image returned for {label} — using placeholder[/yellow]")
+        console.print(f"  [yellow]⚠ No image returned for {label} (attempt 1)[/yellow]")
 
     except Exception as e:
-        console.print(f"  [yellow]⚠ {label} generation failed ({e}) — using placeholder[/yellow]")
+        console.print(f"  [yellow]⚠ {label} generation failed ({e}) (attempt 1)[/yellow]")
+
+    # ── Second fallback: simpler prompt for pattern (common failure case) ──────
+    if label == "pattern":
+        simple_pattern_prompt = (
+            "Abstract geometric repeating pattern. "
+            "Minimalist shapes, evenly spaced, consistent color. "
+            "Square tile. No text, no letters, no words."
+        )
+        try:
+            client2 = genai.Client(api_key=api_key)
+            response2 = client2.models.generate_content(
+                model="gemini-2.0-flash-exp-image-generation",
+                contents=simple_pattern_prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            for candidate in response2.candidates or []:
+                for part in candidate.content.parts or []:
+                    if hasattr(part, "inline_data") and part.inline_data:
+                        data = part.inline_data.data
+                        if isinstance(data, str):
+                            data = base64.b64decode(data)
+                        save_path.write_bytes(data)
+                        console.print(f"  [green]✓ {label}[/green] (Gemini simple) → {save_path.name}")
+                        return save_path
+        except Exception as e2:
+            console.print(f"  [yellow]⚠ {label} simple fallback also failed ({e2})[/yellow]")
 
     # ── Final fallback: solid-colour placeholder ───────────────────────────────
     _write_placeholder(save_path, label)

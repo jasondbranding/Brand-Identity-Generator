@@ -1225,17 +1225,20 @@ def build_mockup_prompt(
     colors_desc = ", ".join(c.hex for c in direction.colors[:3]) if direction.colors else primary_hex
 
     system_context = (
-        "You are a professional brand identity designer and mockup renderer.\n"
-        "Your task: given a high-quality mockup photo and a brand logo, "
-        "integrate the brand identity into the photo at the specified zones.\n\n"
-        "Rendering rules:\n"
-        "  - Work from the original photo — do NOT invent new backgrounds or scenes.\n"
-        "  - Replace ONLY the designated placement zones with brand assets.\n"
-        "  - Keep ALL non-zone areas pixel-perfect: lighting, shadows, materials, "
-        "perspective, and scene composition must be identical to the original.\n"
-        "  - Render brand assets as natural parts of the material "
-        "(dimensional signage on walls, screen-print on fabric, digital on screens, etc.).\n"
-        "  - Output a single photorealistic image. No text, captions, or watermarks.\n\n"
+        "THIS IS A PHOTO EDITING TASK — NOT AN IMAGE GENERATION TASK.\n"
+        "You will receive an existing high-quality photograph. "
+        "Your only job is to minimally edit that photo by placing brand assets "
+        "into specific pixel zones. Everything else stays exactly the same.\n\n"
+        "CRITICAL RULES:\n"
+        "  1. The output image MUST look like the original photo with small targeted edits.\n"
+        "  2. DO NOT redraw, repaint, or regenerate the scene. DO NOT invent new backgrounds.\n"
+        "  3. Preserve 100% of the original photo EXCEPT inside the designated zones.\n"
+        "  4. Lighting, shadows, camera angle, materials, background, and composition "
+        "must be pixel-identical to the original outside the zones.\n"
+        "  5. Inside each zone: integrate brand assets so they look like they were "
+        "physically printed, painted, or applied to the surface "
+        "(e.g. screen-print on fabric, vinyl on wall, etch on acrylic).\n"
+        "  6. Output a single photorealistic image only. No captions, no watermarks.\n\n"
     )
 
     brand_brief = (
@@ -1328,9 +1331,10 @@ def _ai_reconstruct_mockup(
         # 2. Original high-quality photo — the only visual base
         parts.append(genai_types.Part.from_text(
             text=(
-                "ORIGINAL MOCKUP PHOTO — this is your canvas. "
-                "Reconstruct this exact scene with the brand identity integrated. "
-                "Preserve all lighting, shadows, perspective, materials, and surroundings."
+                "ORIGINAL PHOTO TO EDIT — this is the base image. "
+                "You must keep this photo almost entirely unchanged. "
+                "Only modify the specific pixel zones described above. "
+                "Every other pixel must remain identical to this photo."
             )
         ))
         parts.append(genai_types.Part.from_bytes(
@@ -1356,20 +1360,33 @@ def _ai_reconstruct_mockup(
         # 4. Final directive
         parts.append(genai_types.Part.from_text(
             text=(
-                "Now output the final reconstructed mockup image. "
-                "Use the original photo as the base — only modify the placement zones. "
-                "The result must be photorealistic, seamless, and production-ready. "
-                "Output image only, no captions or explanations."
+                "Now output the edited photo. "
+                "The original photo must be UNCHANGED except inside the brand placement zones. "
+                "The result must look like the same photograph taken from the same angle, "
+                "same lighting, same scene — with the brand assets naturally applied. "
+                "Output the final image only. No text, no captions, no borders."
             )
         ))
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash-exp-image-generation",
-            contents=parts,
-            config=genai_types.GenerateContentConfig(
-                response_modalities=["IMAGE", "TEXT"],
-            ),
-        )
+        # Try preview model first (better at image editing), fall back to exp
+        _model = "gemini-2.0-flash-preview-image-generation"
+        try:
+            response = client.models.generate_content(
+                model=_model,
+                contents=parts,
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+        except Exception:
+            _model = "gemini-2.0-flash-exp-image-generation"
+            response = client.models.generate_content(
+                model=_model,
+                contents=parts,
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
 
         for candidate in response.candidates or []:
             for part in candidate.content.parts or []:
@@ -1567,7 +1584,7 @@ def composite_all_mockups(
         composited: List[Path] = []
         ok_count   = 0
         fail_count = 0
-        brand_name = assets.direction.direction_name
+        brand_name = getattr(assets, "brand_name", "") or assets.direction.direction_name
 
         console.print(f"\n  Option {num} — AI compositing {len(processed_files)} mockup(s)…")
 
