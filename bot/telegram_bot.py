@@ -1899,7 +1899,7 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
-# ── Pipeline Phase 2: full assets for chosen direction ────────────────────────
+# ── Pipeline Phase 2: progressive delivery ────────────────────────────────────
 
 async def _run_pipeline_phase2(
     context: ContextTypes.DEFAULT_TYPE,
@@ -1911,18 +1911,32 @@ async def _run_pipeline_phase2(
     api_key: str,
     directions_output: object,
 ) -> None:
-    """Run Phase 2: bg + pattern + palette + mockup + stylescape for chosen direction."""
+    """
+    Phase 2: generate base assets then composite mockups.
+    Each step sends results to Telegram immediately when ready — no waiting for everything.
+
+    Order of delivery:
+      1. Logo variants (white / black / transparent) → send immediately
+      2. Background → send immediately
+      3. Color palette + shades → send immediately
+      4. Pattern → send immediately
+      5. Each mockup composited → send immediately
+    """
+    loop = asyncio.get_event_loop()
+    direction_name = escape_md(getattr(chosen_direction, "direction_name", ""))
+
     progress_msg = await context.bot.send_message(
         chat_id=chat_id,
-        text="⏳ *Phase 2 đang chạy\\.\\.\\.*",
+        text=f"⏳ *Phase 2 — {direction_name}*\n\n🖌 Đang render logo variants, background, palette, pattern\\.\\.\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     progress_msg_id = progress_msg.message_id
 
+    # ── Step 1: Generate base assets in thread ────────────────────────────────
+    runner = PipelineRunner(api_key=api_key)
     def on_progress(msg: str) -> None:
         asyncio.create_task(safe_edit(context, chat_id, progress_msg_id, msg))
 
-    runner = PipelineRunner(api_key=api_key)
     result = await runner.run_assets_phase(
         direction=chosen_direction,
         output_dir=output_dir,
@@ -1940,115 +1954,159 @@ async def _run_pipeline_phase2(
             _cleanup(brief_dir)
         return
 
+    assets = result.assets
     elapsed = result.elapsed_seconds
     mins = int(elapsed // 60)
     secs = int(elapsed % 60)
     await safe_edit(
         context, chat_id, progress_msg_id,
-        f"✅ *Assets hoàn thành\\!* {mins}m {secs}s\n\nĐang gửi kết quả\\.\\.\\."
+        f"✅ *Base assets xong\\!* {mins}m {secs}s — đang gửi\\.\\.\\."
     )
 
-    # ── Generate + send PDF ───────────────────────────────────────────────────
-    try:
-        pdf_path = generate_pdf_report(
-            directions_output,
-            output_dir,
-            result.image_files,
-            brand_name=brief.brand_name,
-        )
-        if pdf_path and pdf_path.exists():
-            await context.bot.send_document(
-                chat_id=chat_id,
-                document=open(pdf_path, "rb"),
-                filename=pdf_path.name,
-                caption=f"📊 {escape_md(brief.brand_name)} — Brand Identity Report",
-            )
-    except Exception as e:
-        logger.warning(f"PDF generation failed: {e}")
+    # ── Step 2: Send logo variants immediately ────────────────────────────────
+    from telegram import InputMediaPhoto
+    logo_variants = []
+    for attr, label in [
+        ("logo",             "Logo chính"),
+        ("logo_white",       "Logo trắng"),
+        ("logo_black",       "Logo đen"),
+        ("logo_transparent", "Logo transparent"),
+    ]:
+        p = getattr(assets, attr, None) if assets else None
+        if p and Path(p).exists() and Path(p).stat().st_size > 100:
+            logo_variants.append((Path(p), label))
 
-    # ── Send stylescape ───────────────────────────────────────────────────────
-    if result.stylescape_path and result.stylescape_path.exists():
+    if logo_variants:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="🗂 *Stylescape*\\:",
+            text="🔤 *Logo versions*\\:",
             parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        media = []
+        for p, label in logo_variants:
+            try:
+                media.append(InputMediaPhoto(media=open(p, "rb"), caption=label))
+            except Exception:
+                pass
+        if media:
+            try:
+                await context.bot.send_media_group(chat_id=chat_id, media=media)
+            except Exception:
+                for p, label in logo_variants:
+                    try:
+                        await context.bot.send_document(
+                            chat_id=chat_id,
+                            document=open(p, "rb"),
+                            filename=p.name,
+                            caption=label,
+                        )
+                    except Exception:
+                        pass
+
+    # ── Step 3: Send background ───────────────────────────────────────────────
+    bg = getattr(assets, "background", None) if assets else None
+    if bg and Path(bg).exists():
+        await context.bot.send_message(
+            chat_id=chat_id, text="🌄 *Background*\\:", parse_mode=ParseMode.MARKDOWN_V2
         )
         try:
             await context.bot.send_document(
-                chat_id=chat_id,
-                document=open(result.stylescape_path, "rb"),
-                filename=result.stylescape_path.name,
-                caption=f"Option {chosen_direction.option_number} stylescape",
+                chat_id=chat_id, document=open(bg, "rb"), filename=Path(bg).name
             )
         except Exception as e:
-            logger.warning(f"Stylescape send failed: {e}")
+            logger.warning(f"Background send failed: {e}")
 
-    # ── Send palette strip ────────────────────────────────────────────────────
-    if result.palette_png and result.palette_png.exists():
+    # ── Step 4: Send palette + shades ─────────────────────────────────────────
+    palette_png = result.palette_png or (getattr(assets, "palette_png", None) if assets else None)
+    shades_png  = getattr(assets, "shades_png", None) if assets else None
+
+    if palette_png and Path(palette_png).exists():
         await context.bot.send_message(
-            chat_id=chat_id,
-            text="🎨 *Color Palette*\\:",
-            parse_mode=ParseMode.MARKDOWN_V2,
+            chat_id=chat_id, text="🎨 *Color Palette*\\:", parse_mode=ParseMode.MARKDOWN_V2
         )
         try:
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=open(result.palette_png, "rb"),
-                filename=result.palette_png.name,
+                document=open(palette_png, "rb"),
+                filename=Path(palette_png).name,
             )
         except Exception as e:
             logger.warning(f"Palette send failed: {e}")
 
-    # ── Send remaining images (pattern, mockups) ──────────────────────────────
-    sent_already = set()
-    if result.stylescape_path:
-        sent_already.add(str(result.stylescape_path))
-    if result.palette_png:
-        sent_already.add(str(result.palette_png))
+    if shades_png and Path(shades_png).exists():
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(shades_png, "rb"),
+                filename=Path(shades_png).name,
+                caption="🌈 Shade scales",
+            )
+        except Exception as e:
+            logger.warning(f"Shades send failed: {e}")
 
-    raw_imgs = [
-        p for p in result.image_files
-        if str(p) not in sent_already
-        and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
-        and p.name not in {"background.png"}
-    ]
-    if raw_imgs:
+    # ── Step 5: Send pattern ──────────────────────────────────────────────────
+    pattern = getattr(assets, "pattern", None) if assets else None
+    if pattern and Path(pattern).exists():
+        await context.bot.send_message(
+            chat_id=chat_id, text="🔲 *Pattern tile*\\:", parse_mode=ParseMode.MARKDOWN_V2
+        )
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(pattern, "rb"),
+                filename=Path(pattern).name,
+            )
+        except Exception as e:
+            logger.warning(f"Pattern send failed: {e}")
+
+    # ── Step 6: Mockups — composite each one and send immediately ─────────────
+    from src.mockup_compositor import get_processed_mockup_files, composite_single_mockup
+
+    processed_files = get_processed_mockup_files()
+    if processed_files and assets:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"🖼 *Pattern \\& Mockups* \\({len(raw_imgs)} files\\)\\:",
+            text=f"🧩 *Mockups* — đang composite {len(processed_files)} ảnh\\.\\.\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        from telegram import InputMediaDocument
-        for chunk_start in range(0, len(raw_imgs), 9):
-            chunk = raw_imgs[chunk_start:chunk_start + 9]
-            media = []
-            for img in chunk:
-                try:
-                    with open(img, "rb") as f:
-                        media.append(InputMediaDocument(media=f.read(), filename=img.name))
-                except Exception:
-                    pass
-            if media:
-                try:
-                    await context.bot.send_media_group(chat_id=chat_id, media=media)
-                except Exception:
-                    for img in chunk:
-                        try:
-                            await context.bot.send_document(
-                                chat_id=chat_id,
-                                document=open(img, "rb"),
-                                filename=img.name,
-                            )
-                        except Exception:
-                            pass
+        mockup_dir = (
+            Path(assets.background).parent / "mockups"
+            if assets.background and Path(assets.background).parent.exists()
+            else output_dir / "mockups"
+        )
+        mockup_count = 0
+        for pf in processed_files:
+            try:
+                composited = await loop.run_in_executor(
+                    None,
+                    lambda pf=pf: composite_single_mockup(
+                        processed_file=pf,
+                        assets=assets,
+                        api_key=api_key,
+                        mockup_dir=mockup_dir,
+                    ),
+                )
+                if composited and composited.exists():
+                    try:
+                        await context.bot.send_document(
+                            chat_id=chat_id,
+                            document=open(composited, "rb"),
+                            filename=composited.name,
+                            caption=f"🖼 Mockup: {pf.stem}",
+                        )
+                        mockup_count += 1
+                    except Exception as e:
+                        logger.warning(f"Mockup send failed {pf.stem}: {e}")
+            except Exception as e:
+                logger.warning(f"Mockup composite failed {pf.name}: {e}")
+    else:
+        logger.info("No processed mockup files found — skipping mockup step")
 
     # ── Done! ─────────────────────────────────────────────────────────────────
-    direction_name = escape_md(getattr(chosen_direction, "direction_name", ""))
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
-            f"🎉 *{escape_md(brief.brand_name)}* brand identity hoàn thành\\!\n\n"
-            f"Hướng đã chọn: *{direction_name}*\n\n"
+            f"🎉 *{escape_md(brief.brand_name)}* — *{direction_name}* hoàn thành\\!\n\n"
             f"Gõ /start để bắt đầu project mới\\."
         ),
         parse_mode=ParseMode.MARKDOWN_V2,

@@ -1534,7 +1534,10 @@ def _ai_reconstruct_mockup(
         return None
 
     try:
-        client   = genai.Client(api_key=api_key, http_options={"timeout": 90})
+        # The new google-genai client handles retries and HTTP connectivity natively.
+        # Explicit http_options with "timeout" is causing "deadline 1s is too short"
+        # and "validation error for HttpOptions" depending on the format.
+        client   = genai.Client(api_key=api_key)
         mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                     ".png": "image/png",  ".webp": "image/webp"}
 
@@ -1592,10 +1595,10 @@ def _ai_reconstruct_mockup(
 
         # Model ladder: confirmed-working first, experimental last
         _models = [
-            "gemini-2.5-flash-image",                    # confirmed working
-            "gemini-2.0-flash-exp-image-generation",     # legacy fallback
-            "gemini-3-pro-image-preview",                # may not exist yet
-            "gemini-2.0-flash-preview-image-generation", # last resort
+            "gemini-2.5-flash-image",               # Nano Banana — fast, great quality
+            "gemini-3-pro-image-preview",           # Nano Banana Pro — best quality
+            "gemini-2.0-flash-exp-image-generation",# legacy fallback
+            "gemini-2.0-flash-preview-image-generation",
         ]
         response = None
         _model = _models[0]
@@ -1615,8 +1618,11 @@ def _ai_reconstruct_mockup(
                 if any(k in err_str for k in (
                     "not found", "permission", "not supported", "invalid",
                     "timed out", "timeout", "ssl", "handshake", "connection",
+                    "503", "unavailable", "429", "resource_exhausted"
                 )):
+                    console.print(f"      [dim]↳ Model {_model} failed: {err_str[:100]}... trying next[/dim]")
                     continue
+                console.print(f"      [red]↳ Model {_model} unexpected error: {err_str}[/red]")
                 raise  # re-raise unexpected errors (rate limit, etc.)
         if response is None:
             return None
@@ -1886,3 +1892,79 @@ def composite_all_mockups(
         )
 
     return results
+
+
+def composite_single_mockup(
+    processed_file: Path,
+    assets: "DirectionAssets",
+    api_key: str,
+    mockup_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """
+    Composite brand assets onto a single processed mockup file.
+    Used for progressive delivery — call once per mockup, send result immediately.
+
+    Returns the composited image Path on success, or None on failure.
+    """
+    if not processed_file.exists():
+        return None
+
+    if mockup_dir is None:
+        if assets.background and assets.background.parent.exists():
+            mockup_dir = assets.background.parent / "mockups"
+        else:
+            slug = _slugify(assets.direction.direction_name)
+            mockup_dir = Path("outputs") / f"option_{assets.direction.option_number}_{slug}" / "mockups"
+    mockup_dir.mkdir(parents=True, exist_ok=True)
+
+    out_path = mockup_dir / (processed_file.stem + "_composite.png")
+    brand_name = getattr(assets, "brand_name", "") or assets.direction.direction_name
+
+    try:
+        zones     = _extract_zones(processed_file)
+        zone_text = _zones_to_text(zones)
+        original_path = _find_original(processed_file)
+        if not original_path:
+            console.print(f"  [yellow]⚠ {processed_file.name}: original not found — skipping[/yellow]")
+            return None
+
+        mockup_key = MOCKUP_KEY_MAP.get(processed_file.name, "")
+        prompt = build_mockup_prompt(mockup_key, assets, brand_name, zone_text=zone_text)
+
+        logo_for_ai = (
+            assets.logo_transparent
+            if (assets.logo_transparent
+                and assets.logo_transparent.exists()
+                and assets.logo_transparent.stat().st_size > 100)
+            else assets.logo
+        )
+
+        ai_bytes = _ai_reconstruct_with_retry(
+            original_path=original_path,
+            full_prompt=prompt,
+            logo_path=logo_for_ai,
+            api_key=api_key,
+            zones=zones,
+        )
+
+        if ai_bytes:
+            out_path.write_bytes(ai_bytes)
+            console.print(f"  [green]✓[/green] {processed_file.stem} composited → {out_path.name}")
+            return out_path
+        else:
+            console.print(f"  [yellow]⚠ {processed_file.stem}: all attempts failed[/yellow]")
+            return None
+
+    except Exception as exc:
+        console.print(f"  [yellow]✗ {processed_file.stem} ERROR: {exc}[/yellow]")
+        return None
+
+
+def get_processed_mockup_files(processed_dir: Path = PROCESSED_DIR) -> List[Path]:
+    """Return sorted list of processed mockup files available for compositing."""
+    if not processed_dir.exists():
+        return []
+    return sorted(
+        p for p in processed_dir.iterdir()
+        if p.suffix.lower() in IMAGE_EXTS and not p.name.startswith(".")
+    )

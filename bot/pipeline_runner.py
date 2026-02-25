@@ -249,41 +249,18 @@ class PipelineRunner:
                 style_ref_images=style_ref_images or None,
             )
 
-            self._progress(on_progress, "🧩 *Phase 2* — Compositing mockups\\.\\.\\.")
-            try:
-                from src.mockup_compositor import composite_all_mockups
-                mockup_results = composite_all_mockups({direction.option_number: assets})
-                assets.mockups = mockup_results.get(direction.option_number)
-            except Exception as e:
-                self._progress(on_progress, f"⚠️ Mockups skipped: {e}")
-
-            try:
-                from src.social_compositor import generate_social_posts
-                generate_social_posts({direction.option_number: assets})
-            except Exception:
-                pass
-
-            self._progress(on_progress, "🗂 *Phase 2* — Assembling stylescape\\.\\.\\.")
-            stylescape_path = None
-            try:
-                from src.compositor import build_all_stylescapes
-                ss_map = build_all_stylescapes({direction.option_number: assets}, output_dir=output_dir)
-                stylescape_path = ss_map.get(direction.option_number)
-            except Exception as e:
-                self._progress(on_progress, f"⚠️ Stylescape skipped: {e}")
-
-            image_files = sorted(
-                p for p in output_dir.glob("**/*.png")
-                if p.is_file() and p.stat().st_size > 500
-            )
+            # Base assets (logo variants + background + pattern + palette) are now complete.
+            # Mockup compositing is done progressively in telegram_bot._run_pipeline_phase2
+            # so each mockup can be sent to Telegram as soon as it's ready.
+            # Social posts and stylescape have been removed from this phase.
 
             return AssetsPhaseResult(
                 success=True,
                 output_dir=output_dir,
                 assets=assets,
-                stylescape_path=stylescape_path,
+                stylescape_path=None,
                 palette_png=getattr(assets, "palette_png", None),
-                image_files=image_files,
+                image_files=[],   # populated by telegram_bot during progressive send
                 elapsed_seconds=time.time() - start,
             )
 
