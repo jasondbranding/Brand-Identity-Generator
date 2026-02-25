@@ -27,6 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .director import BrandDirection, ColorSwatch
 from .generator import DirectionAssets
+from .palette_renderer import render_palette_cell, swatches_to_dicts
 
 # ── Canvas geometry ───────────────────────────────────────────────────────────
 
@@ -262,41 +263,20 @@ def _cell_logo(assets: DirectionAssets, w: int, h: int) -> Image.Image:
     return img
 
 
-def _cell_palette(direction: BrandDirection, w: int, h: int) -> Image.Image:
-    """Color palette swatches with hex codes."""
-    img = Image.new("RGB", (w, h), (14, 14, 18))
-    draw = ImageDraw.Draw(img)
+def _cell_palette(
+    direction: BrandDirection,
+    w: int,
+    h: int,
+    enriched_colors: Optional[List[dict]] = None,
+) -> Image.Image:
+    """
+    Color palette cell — vertical strip format.
 
-    PAD = 30
-    font_hdr = _load_font(20)
-    font_hex = _load_font(16)
-    font_name = _load_font(14)
-
-    draw.text((PAD, PAD), "COLOR  PALETTE", fill=(80, 80, 95), font=font_hdr)
-
-    colors = direction.colors[:6]
-    n = len(colors)
-    if n == 0:
-        return img
-
-    gap = 10
-    swatch_w = (w - 2 * PAD - (n - 1) * gap) // n
-    swatch_h = max(55, min(140, int((h - PAD - 80) * 0.55)))
-    sy = PAD + 44
-
-    for i, swatch in enumerate(colors):
-        rgb = _hex_to_rgb(swatch.hex)
-        sx = PAD + i * (swatch_w + gap)
-        draw.rounded_rectangle(
-            [sx, sy, sx + swatch_w, sy + swatch_h], radius=8, fill=rgb
-        )
-        draw.text((sx, sy + swatch_h + 8), swatch.hex.upper(),
-                  fill=(120, 120, 135), font=font_hex)
-        short = swatch.name[:13] if len(swatch.name) > 13 else swatch.name
-        draw.text((sx, sy + swatch_h + 26), short,
-                  fill=(70, 70, 82), font=font_name)
-
-    return img
+    Uses enriched_colors (from palette_fetcher) if provided,
+    otherwise falls back to direction.colors ColorSwatch objects.
+    """
+    colors = enriched_colors if enriched_colors else swatches_to_dicts(direction.colors)
+    return render_palette_cell(colors, w, h)
 
 
 def _cell_pattern(assets: DirectionAssets, w: int, h: int) -> Image.Image:
@@ -400,13 +380,17 @@ def _cell_info(direction: BrandDirection, w: int, h: int) -> Image.Image:
 def assemble_stylescape(
     assets: DirectionAssets,
     output_dir: Path,
+    enriched_colors: Optional[List[dict]] = None,
 ) -> Path:
     """
     Compose 14-cell stylescape grid and save as PNG.
 
     Args:
-        assets:     DirectionAssets including .mockups list (up to 10 paths).
-        output_dir: Where to save the final stylescape PNG.
+        assets:          DirectionAssets including .mockups list (up to 10 paths).
+        output_dir:      Where to save the final stylescape PNG.
+        enriched_colors: Optional enriched color dicts from palette_fetcher
+                         (with hex, name, role, cmyk, source). Falls back to
+                         direction.colors ColorSwatch objects if not provided.
 
     Returns:
         Path to the saved stylescape PNG.
@@ -428,7 +412,7 @@ def assemble_stylescape(
             cell_img = _cell_logo(assets, cw, ch)
 
         elif ctype == "palette":
-            cell_img = _cell_palette(assets.direction, cw, ch)
+            cell_img = _cell_palette(assets.direction, cw, ch, enriched_colors=enriched_colors)
 
         elif ctype == "pattern":
             cell_img = _cell_pattern(assets, cw, ch)
@@ -478,7 +462,11 @@ def build_all_stylescapes(
             f"{assets.direction.direction_name}  "
             f"({n_mockups} mockups)[/cyan]"
         )
-        path = assemble_stylescape(assets, output_dir)
+        path = assemble_stylescape(
+            assets,
+            output_dir,
+            enriched_colors=getattr(assets, "enriched_colors", None),
+        )
         stylescapes[num] = path
         console.print(f"  [green]✓[/green] → {path.name}")
 
