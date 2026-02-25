@@ -68,6 +68,7 @@ def generate_all_assets(
     brief_announcement_copy: str = "",
     brief_text: str = "",
     moodboard_images: Optional[list] = None,
+    style_ref_images: Optional[list] = None,
 ) -> dict:
     """
     Generate bg + logo + pattern for every direction.
@@ -83,6 +84,10 @@ def generate_all_assets(
         brief_text:              Full raw brief text — used for copy fallback generation
         moodboard_images:        Client-provided reference images from the brief folder
                                  Injected into logo/pattern generation as highest-priority refs
+        style_ref_images:        User-chosen reference images as STYLE ANCHOR — ALL logos
+                                 must match the visual rendering style of these images.
+                                 Different from moodboard: these lock the render aesthetic
+                                 (flat/hand-drawn/geometric) across all 4 directions.
 
     Returns:
         Dict mapping option_number → DirectionAssets
@@ -104,6 +109,7 @@ def generate_all_assets(
             brief_announcement_copy=brief_announcement_copy,
             brief_text=brief_text,
             moodboard_images=moodboard_images,
+            style_ref_images=style_ref_images,
         )
         results[direction.option_number] = assets
 
@@ -383,6 +389,7 @@ def _generate_direction_assets(
     brief_announcement_copy: str = "",
     brief_text: str = "",
     moodboard_images: Optional[list] = None,
+    style_ref_images: Optional[list] = None,
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
@@ -437,6 +444,7 @@ def _generate_direction_assets(
         brief_keywords=effective_keywords,
         moodboard_images=moodboard_images,
         logo_text_allowed=_logo_text_allowed,
+        style_ref_images=style_ref_images,
     )
 
     pattern = _generate_image(
@@ -574,6 +582,7 @@ def _generate_image(
     brief_keywords: Optional[list] = None,
     moodboard_images: Optional[list] = None,
     logo_text_allowed: bool = False,
+    style_ref_images: Optional[list] = None,
 ) -> Optional[Path]:
     """
     Try Imagen 3 first, then Gemini multimodal as fallback.
@@ -677,8 +686,39 @@ def _generate_image(
             parts       = [types.Part.from_text(text=full_prompt)]
             total_loaded = 0
 
+            # ── Layer 0: style reference images (visual rendering anchor) ───
+            # These are user-chosen style refs — ALL logos must match their aesthetic.
+            # Highest priority: they define HOW the mark looks (render style, stroke, detail).
+            style_refs_loaded = 0
+            if label == "logo" and style_ref_images:
+                for i, img_path in enumerate(style_ref_images[:2]):  # max 2 style refs
+                    try:
+                        img_bytes = Path(img_path).read_bytes()
+                        ext  = Path(img_path).suffix.lower().lstrip(".")
+                        mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
+                        parts.append(types.Part.from_text(
+                            text=(
+                                f"⭐ STYLE ANCHOR {i + 1} — "
+                                "This is the user's chosen visual style reference. "
+                                "Your logo MUST match this visual aesthetic EXACTLY: "
+                                "same rendering approach (flat/vector/hand-drawn/geometric), "
+                                "same stroke weight and line quality, same level of detail and simplicity. "
+                                "The concept/subject of your logo will differ, but the HOW it looks must match this."
+                            )
+                        ))
+                        parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
+                        style_refs_loaded += 1
+                        total_loaded += 1
+                    except Exception:
+                        pass
+                if style_refs_loaded:
+                    console.print(f"  [dim]style anchor injected: {style_refs_loaded} ref(s) — aesthetic locked[/dim]")
+
             # ── Layer 1: client moodboard images ──────────────────────────
             client_refs = list(moodboard_images or [])
+            # Skip any paths already used as style refs
+            style_ref_set = set(str(p) for p in (style_ref_images or []))
+            client_refs = [p for p in client_refs if str(p) not in style_ref_set]
             for i, img_path in enumerate(client_refs[:8]):   # cap at 8 client images
                 try:
                     img_bytes = Path(img_path).read_bytes()
@@ -750,11 +790,16 @@ def _generate_image(
                     summary_parts.append(
                         f"{n_lib_loaded} library reference(s) from: {blend_str}"
                     )
+                style_anchor_note = (
+                    f"⭐ CRITICAL: Match the STYLE ANCHOR aesthetic exactly — same rendering approach, stroke weight, detail level. "
+                    if style_refs_loaded else ""
+                )
                 parts.append(types.Part.from_text(
                     text=(
                         f"You have studied {total_loaded} visual references: "
                         + " and ".join(summary_parts) + ". "
                         f"Now generate the new {label_noun} described at the top. "
+                        + style_anchor_note +
                         "Honour the client moodboard's aesthetic. "
                         "Match the production quality of the library references. "
                         "The result must be entirely original."

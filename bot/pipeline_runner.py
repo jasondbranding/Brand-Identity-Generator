@@ -134,10 +134,25 @@ class PipelineRunner:
                 except Exception as e:
                     self._progress(on_progress, f"⚠️ Research skipped: {e}")
 
+            # ── Step 3.5: Concept ideation pre-pass ──────────────────────────
+            concept_cores = []
+            style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
+            try:
+                from src.director import generate_concept_cores
+                self._progress(on_progress, "💡 *Step 3\\.5/6* — Concept ideation \\(tư duy hình ảnh\\)\\.\\.\\.")
+                concept_cores = generate_concept_cores(brief)
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Concept ideation skipped: {e}")
+
             # ── Step 4: Generate brand directions ────────────────────────────
             self._progress(on_progress, "🎨 *Step 4/6* — Tạo brand directions\\.\\.\\.")
             from src.director import generate_directions
-            directions_output = generate_directions(brief, research_context=research_context)
+            directions_output = generate_directions(
+                brief,
+                research_context=research_context,
+                concept_cores=concept_cores or None,
+                style_ref_paths=style_ref_images or None,
+            )
 
             # Save directions markdown + JSON
             directions_md   = output_dir / "directions.md"
@@ -172,6 +187,7 @@ class PipelineRunner:
                 brief_announcement_copy=getattr(brief, "announcement_copy", ""),
                 brief_text=getattr(brief, "brief_text", ""),
                 moodboard_images=getattr(brief, "moodboard_images", None) or None,
+                style_ref_images=style_ref_images or None,
             )
 
             # ── Step 6a: Composite mockups ────────────────────────────────────

@@ -81,7 +81,8 @@ logger = logging.getLogger(__name__)
     MODE_CHOICE,
     CONFIRM,
     REF_CHOICE,
-) = range(14)
+    REF_UPLOAD,
+) = range(15)
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -1400,23 +1401,45 @@ def _fetch_preview_refs(brief, n: int = 4) -> list:
         return []
 
 
+def _build_ref_keyboard(n_refs: int, selected: list) -> InlineKeyboardMarkup:
+    """
+    Build the ref selection keyboard.
+    selected = list of 0-based indices already chosen (max 2).
+    Buttons show ✅ if selected, number if not.
+    """
+    ref_row = []
+    for i in range(1, n_refs + 1):
+        label = f"✅ {i}" if (i - 1) in selected else f"🖼 {i}"
+        ref_row.append(InlineKeyboardButton(label, callback_data=f"ref_toggle_{i}"))
+
+    action_row = []
+    if selected:
+        n = len(selected)
+        action_row.append(InlineKeyboardButton(
+            f"✅ Xác nhận ({n} ref đã chọn)",
+            callback_data="ref_confirm",
+        ))
+    action_row.append(InlineKeyboardButton("📁 Upload ref của bạn", callback_data="ref_upload"))
+    action_row.append(InlineKeyboardButton("⚡ Bỏ qua", callback_data="ref_skip"))
+
+    rows = [ref_row, action_row]
+    return InlineKeyboardMarkup(rows)
+
+
 async def step_ref_choice_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    After brief confirm → show 4 reference logo images and ask user to pick one
-    as visual anchor, or skip straight to generation.
-    Called from step_confirm_callback when user hits "Generate".
+    After brief confirm → show 4 reference logo images, let user pick 1 or 2
+    as visual style anchor, upload their own ref, or skip.
     """
     brief = get_brief(context)
     refs  = _fetch_preview_refs(brief, n=4)
 
     if not refs:
-        # No refs available → go straight to pipeline
         return await _launch_pipeline(update, context)
 
-    # Store refs in context for the handler
-    context.user_data["preview_refs"] = [str(p) for p in refs]
+    context.user_data["preview_refs"]    = [str(p) for p in refs]
+    context.user_data["selected_refs"]   = []   # list of 0-based indices
 
-    # Send images as a group with captions
     from telegram import InputMediaPhoto
     media_group = []
     for i, p in enumerate(refs, 1):
@@ -1424,8 +1447,7 @@ async def step_ref_choice_show(update: Update, context: ContextTypes.DEFAULT_TYP
             media_group.append(
                 InputMediaPhoto(
                     media=open(p, "rb"),
-                    caption=f"*{i}*" if i == 1 else str(i),
-                    parse_mode=ParseMode.MARKDOWN_V2,
+                    caption=str(i),
                 )
             )
         except Exception:
@@ -1437,16 +1459,14 @@ async def step_ref_choice_show(update: Update, context: ContextTypes.DEFAULT_TYP
             media=media_group,
         )
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🖼 {i}", callback_data=f"ref_{i}") for i in range(1, len(media_group) + 1)],
-        [InlineKeyboardButton("⚡ Bỏ qua, generate ngay", callback_data="ref_skip")],
-    ])
+    kb = _build_ref_keyboard(len(media_group), [])
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=(
-            "👆 *Đây là một số hướng visual tham khảo phù hợp với brief của bạn\\.*\n\n"
-            "Bấm số để chọn hướng bạn thích nhất \\(AI sẽ dùng làm anchor\\), "
-            "hoặc bỏ qua để AI tự quyết\\."
+            "👆 *Chọn style ref cho toàn bộ 4 hướng logo\\.*\n\n"
+            "Bấm để chọn 1 hoặc 2 ảnh — AI sẽ dùng làm style anchor \\(concept khác nhau, "
+            "nhưng cùng render aesthetic\\)\\.\n"
+            "Hoặc upload ảnh ref của chính bạn\\."
         ),
         parse_mode=ParseMode.MARKDOWN_V2,
         reply_markup=kb,
@@ -1455,31 +1475,123 @@ async def step_ref_choice_show(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def step_ref_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle user's ref choice (1-4) or skip."""
+    """Handle ref toggle / confirm / upload / skip."""
     query = update.callback_query
     await query.answer()
-    data  = query.data  # "ref_1" … "ref_4" or "ref_skip"
+    data = query.data
 
-    if data != "ref_skip":
-        idx = int(data.split("_")[1]) - 1
-        refs = context.user_data.get("preview_refs", [])
-        if 0 <= idx < len(refs):
-            chosen_path = refs[idx]
-            # Inject as priority moodboard image for the pipeline
-            brief = get_brief(context)
-            existing = list(getattr(brief, "moodboard_images", []) or [])
-            from pathlib import Path as _Path
-            existing.insert(0, _Path(chosen_path))   # highest priority
-            brief.moodboard_images = existing
-            await query.edit_message_text(
-                f"✅ Đã chọn hướng *{idx + 1}* làm visual anchor\\. Bắt đầu generate\\!",
-                parse_mode=ParseMode.MARKDOWN_V2,
-            )
-        else:
-            await query.edit_message_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
+    refs     = context.user_data.get("preview_refs", [])
+    selected = context.user_data.get("selected_refs", [])
+
+    if data.startswith("ref_toggle_"):
+        idx = int(data.split("_")[2]) - 1   # 0-based
+        if idx in selected:
+            selected.remove(idx)             # deselect
+        elif len(selected) < 2:
+            selected.append(idx)             # add (max 2)
+        context.user_data["selected_refs"] = selected
+        kb = _build_ref_keyboard(len(refs), selected)
+        try:
+            await query.edit_message_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+        return REF_CHOICE
+
+    if data == "ref_upload":
+        await query.edit_message_text(
+            "📁 *Upload ảnh ref của bạn\\.*\n\n"
+            "Gửi 1–2 ảnh logo theo style bạn muốn\\. AI sẽ học render style từ đó\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return REF_UPLOAD
+
+    # ref_confirm or ref_skip
+    from pathlib import Path as _Path
+    if data == "ref_confirm" and selected:
+        chosen_paths = [_Path(refs[i]) for i in selected if 0 <= i < len(refs)]
+        brief = get_brief(context)
+        # Store as style_ref_images (separate from general moodboard)
+        brief.style_ref_images = chosen_paths
+        # Also prepend to moodboard_images so Director gets them as visual context
+        existing = list(getattr(brief, "moodboard_images", []) or [])
+        for p in reversed(chosen_paths):
+            if p not in existing:
+                existing.insert(0, p)
+        brief.moodboard_images = existing
+        await query.edit_message_text(
+            f"✅ Đã chọn {len(chosen_paths)} style ref\\. Bắt đầu generate\\!",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
     else:
         await query.edit_message_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
 
+    return await _launch_pipeline(update, context)
+
+
+async def step_ref_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    REF_UPLOAD state: user sends 1-2 photos as their own style refs.
+    Saves them to temp dir, stores as style_ref_images on the brief.
+    After receiving, proceed to pipeline.
+    """
+    from pathlib import Path as _Path
+    import tempfile
+
+    message = update.message
+    if not message or not message.photo:
+        await message.reply_text(
+            "⚠️ Vui lòng gửi ảnh\\. Hoặc gõ /skip để bỏ qua\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return REF_UPLOAD
+
+    # Get highest resolution version
+    photo = message.photo[-1]
+    file_obj = await context.bot.get_file(photo.file_id)
+
+    # Save to temp dir
+    tmp_dir = _Path(tempfile.mkdtemp(prefix="ref_upload_"))
+    save_path = tmp_dir / f"user_ref_{photo.file_id}.jpg"
+    await file_obj.download_to_drive(str(save_path))
+
+    # Accumulate uploads (user may send 2)
+    uploads = context.user_data.get("ref_uploads", [])
+    uploads.append(str(save_path))
+    context.user_data["ref_uploads"] = uploads
+
+    brief = get_brief(context)
+    chosen_paths = [_Path(p) for p in uploads]
+    brief.style_ref_images = chosen_paths
+    existing = list(getattr(brief, "moodboard_images", []) or [])
+    for p in reversed(chosen_paths):
+        if p not in existing:
+            existing.insert(0, p)
+    brief.moodboard_images = existing
+
+    if len(uploads) < 2:
+        await message.reply_text(
+            f"✅ Đã nhận ref {len(uploads)}\\. Gửi thêm 1 ảnh nữa hoặc bấm /done để bắt đầu\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return REF_UPLOAD
+    else:
+        await message.reply_text(
+            "✅ Đã nhận 2 style ref\\. Bắt đầu generate\\!",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _launch_pipeline(update, context)
+
+
+async def step_ref_upload_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User sends /done after uploading refs — launch pipeline with what we have."""
+    uploads = context.user_data.get("ref_uploads", [])
+    if uploads:
+        await update.message.reply_text(
+            f"✅ Dùng {len(uploads)} style ref\\. Bắt đầu generate\\!",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+    else:
+        await update.message.reply_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
     return await _launch_pipeline(update, context)
 
 
@@ -1814,6 +1926,12 @@ def build_app(token: str) -> Application:
             MODE_CHOICE: [CallbackQueryHandler(step_mode_callback, pattern="^mode_")],
             CONFIRM:     [CallbackQueryHandler(step_confirm_callback, pattern="^confirm_")],
             REF_CHOICE:  [CallbackQueryHandler(step_ref_choice_callback, pattern="^ref_")],
+            REF_UPLOAD:  [
+                MessageHandler(filters.PHOTO, step_ref_upload_handler),
+                MessageHandler(filters.Document.IMAGE, step_ref_upload_handler),
+                CommandHandler("done", step_ref_upload_done),
+                CommandHandler("skip", step_ref_upload_done),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cmd_cancel),
