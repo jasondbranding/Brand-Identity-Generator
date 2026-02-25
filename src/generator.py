@@ -98,6 +98,88 @@ def generate_all_assets(
     return results
 
 
+def _resolve_direction_tags(
+    brief_text: str,
+    direction: "BrandDirection",
+    user_keywords: Optional[list] = None,
+) -> list:
+    """
+    Use Gemini to extract taxonomy-aligned tags from brief + direction context.
+
+    Tags are drawn from the same vocabulary used in index.json so they can
+    score against reference images and style guides.
+
+    Returns a deduplicated list of lowercase tag strings.
+    Falls back to user_keywords on any error.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return list(user_keywords or [])
+
+    # Build a short but rich context block
+    context = f"""Brand brief (excerpt):
+{brief_text.strip()[:800]}
+
+Direction concept: {direction.direction_name}
+Rationale: {getattr(direction, 'rationale', '')[:300]}
+Graphic style: {getattr(direction, 'graphic_style', '')[:200]}
+Typography: {getattr(direction, 'typography_primary', '')}
+Colors: {', '.join(c.hex + ' (' + c.role + ')' for c in direction.colors[:3])}
+"""
+
+    prompt = f"""{context}
+
+Your job: Extract tags that describe this brand's visual identity so we can find the most relevant logo reference images and style guides.
+
+Return ONLY a JSON array of 6–12 lowercase strings from these taxonomies — no explanation:
+
+Industries: tech, saas, fintech, crypto, web3, healthcare, ecommerce, education, real-estate, food, beverage, fashion, automotive, media, consulting, startup, enterprise, creative, nonprofit, gaming
+
+Visual styles: geometric, organic, monoline, filled, minimal, detailed, flat, gradient, sharp, rounded, retro, modern, classic, brutalist, elegant, playful
+
+Moods: confident, calm, bold, playful, serious, premium, accessible, warm, cold, edgy, trustworthy, innovative, elegant, powerful, friendly, mysterious, dynamic, futuristic
+
+Techniques: negative space, grid construction, symmetry, asymmetry, modularity
+
+Example output: ["saas", "tech", "startup", "minimal", "geometric", "confident", "trustworthy", "modern", "negative space"]
+"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        for model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=128,
+                    ),
+                )
+                raw = response.text.strip()
+                # Strip markdown fences
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                    raw = raw.strip()
+                tags = [str(t).lower().strip() for t in __import__("json").loads(raw) if t]
+                if tags:
+                    # Merge with user keywords (deduplicated)
+                    merged = list(dict.fromkeys(tags + list(user_keywords or [])))
+                    console.print(f"  [dim]auto-tags: {', '.join(merged[:8])}{'...' if len(merged) > 8 else ''}[/dim]")
+                    return merged
+                break
+            except Exception as _me:
+                if any(k in str(_me).lower() for k in ("not found", "invalid")):
+                    continue
+                raise
+    except Exception as e:
+        console.print(f"  [dim]tag extraction failed ({type(e).__name__}) — using brief keywords[/dim]")
+
+    return list(user_keywords or [])
+
+
 def _generate_direction_assets(
     direction: BrandDirection,
     output_dir: Path,
@@ -112,6 +194,11 @@ def _generate_direction_assets(
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
     asset_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── Resolve effective tags once for this direction ─────────────────────
+    # Combines user-provided keywords + AI-extracted taxonomy tags from brief+direction
+    # Used for both ref image matching AND style guide matching
+    effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
+
     background = _generate_image(
         prompt=direction.background_prompt,
         save_path=asset_dir / "background.png",
@@ -124,7 +211,7 @@ def _generate_direction_assets(
         save_path=asset_dir / "logo.png",
         label="logo",
         size_hint="square format, centered mark, generous white space around it",
-        brief_keywords=brief_keywords,
+        brief_keywords=effective_keywords,
     )
 
     pattern = _generate_image(
@@ -132,7 +219,7 @@ def _generate_direction_assets(
         save_path=asset_dir / "pattern.png",
         label="pattern",
         size_hint="square tile, seamlessly repeatable",
-        brief_keywords=brief_keywords,
+        brief_keywords=effective_keywords,
     )
 
     # Create white / black / transparent logo variants for compositor use
