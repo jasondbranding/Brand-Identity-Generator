@@ -39,6 +39,10 @@ except ImportError:
 
 # ── Index analysis ────────────────────────────────────────────────────────────
 
+def _is_logos_type(ref_type: str) -> bool:
+    return ref_type == "logos" or ref_type.startswith("logos/")
+
+
 def load_index(ref_type: str) -> dict:
     """Load index.json for a reference type."""
     path = REFERENCES_DIR / ref_type / "index.json"
@@ -64,16 +68,25 @@ def analyze_index(index: dict, ref_type: str) -> dict:
         q = tags.get("quality", 5)
         quality_scores.append(q)
 
+        # Resolve path: support both old absolute local_path and new relative_path
+        rel = entry.get("relative_path", "")
+        abs_path = entry.get("local_path", "")
+        resolved = ""
+        if rel:
+            resolved = str(PROJECT_ROOT / rel)
+        elif abs_path:
+            resolved = abs_path
+
         # Collect for top images
         top_images.append({
             "filename": filename,
-            "local_path": entry.get("local_path", ""),
+            "local_path": resolved,
             "quality": q,
             "tags": tags,
         })
 
         # Count tag values
-        form_key = "form" if ref_type == "logos" else "motif"
+        form_key = "form" if _is_logos_type(ref_type) else "motif"
         form_val = tags.get(form_key, "unknown")
         counters.setdefault(form_key, Counter())[form_val] += 1
 
@@ -251,10 +264,21 @@ def generate_style_guide(
 
         print(f"  Sending {loaded} images + analysis to Gemini...")
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=parts,
-        )
+        # Model ladder for vision+text generation
+        _models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
+        response = None
+        for _m in _models:
+            try:
+                response = client.models.generate_content(model=_m, contents=parts)
+                break
+            except Exception as _me:
+                if any(k in str(_me).lower() for k in ("not found", "invalid", "not supported")):
+                    continue
+                raise
+
+        if response is None:
+            print("  ⚠ All models failed")
+            return None
 
         result = response.text.strip()
 
@@ -329,9 +353,17 @@ def main() -> None:
         content = generate_style_guide(ref_type, api_key, top_n=args.top)
 
         if content:
-            # Use leaf name for output: logos/style_minimal_geometric → style_minimal_geometric
-            leaf = Path(ref_type).name
-            out_path = output_dir / f"{leaf}_style.md"
+            # Mirror refs folder structure:
+            #   logos/style_minimal_geometric → styles/logos/style_minimal_geometric.md
+            #   logos                         → styles/logos.md
+            if "/" in ref_type:
+                top, leaf = ref_type.split("/", 1)
+                cat_out_dir = (output_dir if args.output else DEFAULT_OUTPUT) / top
+            else:
+                cat_out_dir = output_dir if args.output else DEFAULT_OUTPUT
+                leaf = ref_type
+            cat_out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = cat_out_dir / f"{leaf}.md"
             out_path.write_text(content, encoding="utf-8")
             print(f"\n  ✓ Saved → {out_path}")
             print(f"  Length: {len(content)} chars, {content.count(chr(10))} lines")

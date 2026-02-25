@@ -190,6 +190,7 @@ def _generate_image(
 ) -> Optional[Path]:
     """
     Try Imagen 3 first, then Gemini 2.0 Flash as fallback.
+    For logos/patterns: injects relevant style guide from styles/ if available.
     For logos: if reference images are available, use multi-modal style inspiration.
     Returns save_path on success; creates a placeholder on full failure.
     """
@@ -198,9 +199,24 @@ def _generate_image(
         console.print(f"  [yellow]⚠ GEMINI_API_KEY not set — skipping {label}[/yellow]")
         return None
 
+    # ── Style guide injection ──────────────────────────────────────────────────
+    style_guide_block = ""
+    if label in ("logo", "pattern") and brief_keywords:
+        guide = _get_style_guide(brief_keywords, label)
+        if guide:
+            # Extract only the actionable constraints (skip YAML frontmatter)
+            guide_lines = [l for l in guide.splitlines() if not l.startswith("---") and l.strip()]
+            guide_excerpt = "\n".join(guide_lines[:40])  # cap to avoid prompt bloat
+            style_guide_block = (
+                f"\n\n## STYLE GUIDE — apply these rules to this {label}:\n"
+                f"{guide_excerpt}\n"
+                f"## END STYLE GUIDE\n"
+            )
+            console.print(f"  [dim]style guide injected for {label}[/dim]")
+
     if label == "logo":
         full_prompt = (
-            f"{prompt}\n\n"
+            f"{prompt}{style_guide_block}\n\n"
             "Technical requirements:\n"
             "- Single iconic mark/symbol centered on pure white background\n"
             "- High contrast, clean crisp edges, professional vector quality\n"
@@ -212,7 +228,7 @@ def _generate_image(
         )
     elif label == "pattern":
         full_prompt = (
-            f"{prompt}\n\n"
+            f"{prompt}{style_guide_block}\n\n"
             "Technical requirements:\n"
             "- Seamless tileable pattern — all 4 edges MUST align perfectly when tiled\n"
             "- Consistent density and spacing throughout the entire tile\n"
@@ -389,6 +405,7 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos") -> list
                     return []
                 kw_set = {k.lower().strip() for k in keywords if k}
                 scored = []
+                _proj_root = Path(__file__).parent.parent
                 for filename, entry in index.items():
                     tags = entry.get("tags", {})
                     all_tags: set = set()
@@ -399,9 +416,12 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos") -> list
                     overlap = len(kw_set & all_tags)
                     quality = tags.get("quality", 5)
                     score = overlap + quality / 10.0
-                    local_path = entry.get("local_path", "")
-                    if local_path and Path(local_path).exists():
-                        scored.append({"local_path": local_path, "score": score})
+                    # Support both relative_path (new) and local_path (legacy absolute)
+                    rel = entry.get("relative_path", "")
+                    abs_p = entry.get("local_path", "")
+                    resolved = str(_proj_root / rel) if rel else abs_p
+                    if resolved and Path(resolved).exists():
+                        scored.append({"local_path": resolved, "score": score})
                 scored.sort(key=lambda x: x["score"], reverse=True)
                 return scored[:top_n]
 
@@ -411,6 +431,46 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos") -> list
 
     except Exception:
         return []
+
+
+def _get_style_guide(brief_keywords: Optional[list], label: str) -> str:
+    """
+    Find the most relevant style guide (.md) from styles/logos/ or styles/patterns/
+    based on brief keywords matching the category name.
+
+    Returns guide content as a string, or "" if none found.
+    """
+    if not brief_keywords:
+        return ""
+    try:
+        project_root = Path(__file__).parent.parent
+        guide_type = "logos" if label in ("logo",) else "patterns" if label == "pattern" else None
+        if not guide_type:
+            return ""
+
+        guides_dir = project_root / "styles" / guide_type
+        if not guides_dir.exists():
+            return ""
+
+        kw_set = {k.lower().strip() for k in brief_keywords if k}
+        best_score = 0
+        best_content = ""
+
+        for guide_path in guides_dir.glob("*.md"):
+            # Score by how many brief keywords appear in the category name
+            cat_words = set(guide_path.stem.lower().replace("_", " ").split())
+            score = len(kw_set & cat_words)
+            if score > best_score:
+                best_score = score
+                try:
+                    best_content = guide_path.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+
+        return best_content if best_score > 0 else ""
+
+    except Exception:
+        return ""
 
 
 def _write_placeholder(save_path: Path, label: str) -> None:
