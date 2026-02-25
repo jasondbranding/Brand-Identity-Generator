@@ -359,33 +359,51 @@ def _generate_image(
         _ref_type_map = {"logo": "logos", "pattern": "patterns"}
         if label in _ref_type_map and brief_keywords:
             ref_type_key = _ref_type_map[label]
-            ref_images = _get_reference_images(brief_keywords, ref_type_key)
+            ref_images = _get_reference_images(brief_keywords, ref_type_key)   # up to 15
             if ref_images:
                 label_noun = "logo" if label == "logo" else "pattern"
                 parts = [types.Part.from_text(text=full_prompt)]
+
+                # Group refs by category so model understands cross-category blend intent
+                # e.g. "From industry_finance_crypto (#1/#2) … From style_minimal_geometric (#3/#4)"
+                _cat_counter: dict = {}   # cat_name → count within that cat
                 loaded = 0
-                for ref_path in ref_images[:3]:
+                for ref_path in ref_images:
                     try:
                         img_bytes = ref_path.read_bytes()
-                        ext = ref_path.suffix.lower().lstrip(".")
+                        ext  = ref_path.suffix.lower().lstrip(".")
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
+
+                        cat_name = ref_path.parent.name
+                        _cat_counter[cat_name] = _cat_counter.get(cat_name, 0) + 1
+                        cat_label = cat_name.replace("_", " ").title()
+                        cat_idx   = _cat_counter[cat_name]
+
                         parts.append(types.Part.from_text(
                             text=(
-                                f"Quality reference {label_noun} #{loaded+1} — "
-                                "study the craft, execution quality, and aesthetic approach. "
-                                "Do NOT copy this design. Create something entirely original."
+                                f"Reference {label_noun} #{loaded + 1} "
+                                f"[source: {cat_label}, sample {cat_idx}] — "
+                                "Study its craft, production quality, and aesthetic approach. "
+                                "Do NOT copy — use as inspiration only."
                             )
                         ))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
                         loaded += 1
                     except Exception:
                         pass
+
                 if loaded > 0:
+                    cats_seen = list(dict.fromkeys(p.parent.name for p in ref_images))
+                    blend_summary = " + ".join(
+                        c.replace("_", " ").title() for c in cats_seen[:4]
+                    ) + (" + …" if len(cats_seen) > 4 else "")
                     parts.append(types.Part.from_text(
                         text=(
-                            f"Now generate the new {label_noun} described above. "
-                            "Match the production quality of the references. "
-                            "Create an entirely original design."
+                            f"You have studied {loaded} reference {label_noun}s "
+                            f"drawn from {len(cats_seen)} visual categories: {blend_summary}. "
+                            f"Now generate the new {label_noun} described at the top. "
+                            "Synthesise the craft level and aesthetic sensibility across ALL references. "
+                            "The result must be entirely original — not a copy of any single reference."
                         )
                     ))
                     contents = parts
@@ -469,7 +487,7 @@ def _generate_image(
     return save_path
 
 
-def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: int = 3) -> list:
+def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: int = 15) -> list:
     """
     Find reference images that match brand keywords — with guaranteed cross-category diversity.
 
@@ -598,7 +616,7 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: 
         return []
 
 
-def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 3) -> str:
+def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 5) -> str:
     """
     Find and COMBINE the top-N most relevant style guides for this label type.
 
