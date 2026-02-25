@@ -1083,119 +1083,335 @@ MOCKUP_KEY_MAP: Dict[str, str] = {
     "x_account_processed.png":              "x_account",
 }
 
-# Per-mockup scene specs used to build AI reconstruction prompts
-MOCKUP_PROMPTS: Dict[str, Dict[str, str]] = {
+# Per-mockup JSON specs for structured AI prompt generation.
+# Each entry drives build_mockup_prompt() which outputs a JSON structured prompt
+# (same format proven to work with Gemini image editing).
+#
+# originals/ images should show the mockup WITH an existing placeholder logo so
+# the AI task is "replace this logo shape" — not "invent placement from scratch".
+MOCKUP_PROMPTS: Dict[str, Dict] = {
     "wall_logo": {
-        "scene": (
-            "Architectural interior wall with dimensional brand signage. "
-            "The logo appears as mounted letters or a logo mark on the wall surface, "
-            "casting realistic drop shadows."
+        "goal": (
+            "Replace the existing logo/lettering on the architectural wall panel with the "
+            "provided brand logo mark. Maintain the exact same 3D dimensional signage style, "
+            "size, placement, lighting, and perspective. Only change the logo shape."
         ),
-        "logo_placement": "centered on the parallelogram-shaped architectural panel",
-        "logo_color": "white or off-white",
-        "logo_size": "large, spanning 65% of the panel width",
-        "material": "painted metal or dimensional acrylic letters",
-        "style": "premium corporate architectural signage, photorealistic",
+        "placeholder_description": "dimensional metal or acrylic letters/logo currently mounted on the wall",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "maintain_mounting_depth": True,
+            "convert_style": {
+                "type": "3D dimensional wall signage",
+                "material": "matte painted metal or brushed aluminum",
+                "edge_finish": "clean bevel",
+                "depth": "same mounting depth as original signage",
+                "shadow": "match original wall shadow exactly",
+                "reflection": "subtle realistic metallic reflections",
+                "color": "white or brand primary color",
+            },
+        },
+        "environment": {
+            "wall_surface": {"preserve_material": True, "preserve_texture": True, "preserve_color": True},
+            "lighting": {"preserve_direction": True, "preserve_intensity": True, "preserve_shadows": True},
+            "architecture": {"preserve_exactly": True},
+        },
+        "constraints": [
+            "only replace the logo mark shape",
+            "keep exact size and placement",
+            "keep exact lighting and wall shadows",
+            "no color change to wall or building",
+            "no extra elements added",
+            "no watermark",
+        ],
+        "style": "ultra photorealistic architectural signage, premium corporate quality, high-end commercial render",
     },
     "app_icon_phone": {
-        "scene": (
-            "Smartphone home screen showing a branded iOS app icon "
-            "with rounded corners and an app name label directly below."
+        "goal": (
+            "Replace the existing app icon on the smartphone home screen with the provided "
+            "brand logo. Keep the exact same rounded-square icon shape, size, position on screen, "
+            "and the app name label below it. Only change the icon artwork."
         ),
-        "logo_placement": "centered inside a rounded-square icon with brand primary color as background",
-        "logo_color": "white",
-        "logo_size": "filling 65% of the icon area",
-        "material": "flat vector, digital",
-        "style": "iOS app icon, clean, modern, app store quality",
+        "placeholder_description": "existing app icon with placeholder logo on phone home screen",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "convert_style": {
+                "type": "flat digital app icon",
+                "background": "brand primary color as icon background",
+                "logo_color": "white",
+                "corner_radius": "iOS standard rounded square",
+                "finish": "clean flat vector, app store quality",
+            },
+        },
+        "environment": {
+            "phone_screen": {"preserve_all_other_icons": True, "preserve_wallpaper": True},
+            "device": {"preserve_exactly": True},
+        },
+        "constraints": [
+            "only replace the single app icon",
+            "keep all other icons unchanged",
+            "keep phone device identical",
+            "keep app name label below icon",
+            "no watermark",
+        ],
+        "style": "crisp digital UI, iOS app icon, photorealistic smartphone screen",
     },
     "black_shirt": {
-        "scene": (
-            "Black t-shirt laid flat. Brand logo screen-printed on the chest area "
-            "with authentic cotton fabric texture showing through the ink."
+        "goal": (
+            "Replace the existing logo printed on the black t-shirt chest area with the "
+            "provided brand logo. Maintain the exact same screen-print look, size, position, "
+            "and fabric texture interaction. Only change the logo artwork."
         ),
-        "logo_placement": "center chest",
-        "logo_color": "white",
-        "logo_size": "medium, 45% of the print zone",
-        "material": "screen-print on cotton, fabric texture overlay",
-        "style": "premium apparel merchandise, streetwear",
+        "placeholder_description": "existing screen-printed logo on black cotton t-shirt chest",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "convert_style": {
+                "type": "screen-print on cotton",
+                "ink_color": "white",
+                "fabric_texture": "cotton weave visible through ink",
+                "ink_opacity": "slightly transparent, fabric shows through",
+                "finish": "authentic apparel print quality",
+            },
+        },
+        "environment": {
+            "shirt": {"preserve_color": True, "preserve_fabric_folds": True, "preserve_texture": True},
+            "background": {"preserve_exactly": True},
+            "lighting": {"preserve_direction": True, "preserve_shadows": True},
+        },
+        "constraints": [
+            "only replace the chest print artwork",
+            "keep exact print size and position",
+            "keep fabric texture visible through ink",
+            "keep shirt color and all folds identical",
+            "no watermark",
+        ],
+        "style": "premium apparel merchandise, streetwear, photorealistic fabric",
     },
     "employee_id": {
-        "scene": (
-            "Corporate employee ID card with a colorful lanyard. "
-            "Card face shows the company logo and name; lanyard stripe uses brand primary color."
+        "goal": (
+            "Replace the existing logo and brand name on the employee ID card with the "
+            "provided brand logo and the correct brand name. Keep the exact card layout, "
+            "lanyard, card proportions, and print quality."
         ),
-        "logo_placement": "logo on the left of the card face, brand name to the right",
-        "logo_color": "white on dark background",
-        "logo_size": "natural, fitting the card logo area",
-        "material": "PVC card, dye-sublimation print quality",
-        "style": "professional corporate, clean",
+        "placeholder_description": "placeholder logo and name on corporate PVC ID card with lanyard",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "replace_brand_name_text": True,
+            "maintain_card_layout": True,
+            "convert_style": {
+                "type": "dye-sublimation print on PVC card",
+                "logo_color": "white on dark background",
+                "text_rendering": "clean sans-serif, high contrast",
+                "finish": "professional corporate ID quality",
+            },
+        },
+        "environment": {
+            "card_body": {"preserve_layout": True, "preserve_dimensions": True},
+            "lanyard": {"preserve_color": True, "preserve_texture": True},
+            "background": {"preserve_exactly": True},
+        },
+        "constraints": [
+            "only replace logo and brand name",
+            "keep card dimensions and layout identical",
+            "keep lanyard color and texture",
+            "no watermark",
+        ],
+        "style": "professional corporate ID card, dye-sublimation quality",
     },
     "billboard": {
-        "scene": (
-            "Large outdoor horizontal billboard. The billboard surface shows brand photography "
-            "and a prominent logo mark on the right side of the board face."
+        "goal": (
+            "Replace the existing logo/brand mark on the outdoor billboard with the provided "
+            "brand logo. Keep the exact same billboard composition, size, position, outdoor "
+            "lighting, and vinyl print style. Only change the logo artwork."
         ),
-        "logo_placement": "right side of the billboard face",
-        "logo_color": "white (on photographic background)",
-        "logo_size": "large, 55% of the logo zone width",
-        "material": "vinyl print, outdoor advertising",
-        "style": "high-impact outdoor advertising, photorealistic",
+        "placeholder_description": "existing brand logo on large outdoor billboard vinyl surface",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "convert_style": {
+                "type": "large format vinyl print",
+                "logo_color": "white on photographic/colored background",
+                "finish": "outdoor billboard print quality, slight weather texture",
+                "shadow": "match existing logo shadow and perspective warp",
+            },
+        },
+        "environment": {
+            "billboard_structure": {"preserve_frame": True, "preserve_material": True},
+            "background_scene": {"preserve_sky": True, "preserve_environment": True},
+            "lighting": {"preserve_direction": True, "preserve_intensity": True},
+        },
+        "constraints": [
+            "only replace the logo mark",
+            "keep billboard background imagery identical",
+            "keep perspective warp on logo to match billboard plane",
+            "keep outdoor lighting and environment",
+            "no watermark",
+        ],
+        "style": "high-impact outdoor advertising, photorealistic, commercial billboard quality",
     },
     "disk": {
-        "scene": (
-            "Acrylic or glass transparent disk/puck award with brand logo. "
-            "Clean reflections, premium material, minimal aesthetic."
+        "goal": (
+            "Replace the existing logo etched or printed on the acrylic disk award with the "
+            "provided brand logo. Maintain exact size, centering, material treatment, and "
+            "transparent acrylic reflections. Only change the logo shape."
         ),
-        "logo_placement": "centered on the disk face",
-        "logo_color": "dark/near-black on white or clear surface",
-        "logo_size": "55% of the disk zone",
-        "material": "laser-etched acrylic",
-        "style": "premium minimal, transparent, corporate award",
+        "placeholder_description": "existing logo laser-etched or printed on transparent acrylic disk",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "convert_style": {
+                "type": "laser-etched or printed on acrylic",
+                "logo_color": "dark/frosted on clear acrylic",
+                "finish": "premium etched quality, slight diffusion",
+                "reflection": "maintain acrylic surface reflections around logo",
+            },
+        },
+        "environment": {
+            "disk_material": {"preserve_transparency": True, "preserve_reflections": True},
+            "surface": {"preserve_exactly": True},
+            "lighting": {"preserve_direction": True, "preserve_caustics": True},
+        },
+        "constraints": [
+            "only replace the logo artwork",
+            "keep acrylic transparency and reflections",
+            "keep exact logo size and centering",
+            "no watermark",
+        ],
+        "style": "premium minimal corporate award, ultra photorealistic acrylic material",
     },
     "name_card": {
-        "scene": (
-            "Luxury two-sided business card. One face uses brand primary color with "
-            "the brand name in large typography. The other face is white with a small dark logo."
+        "goal": (
+            "Replace the existing logo and brand name on the business card with the provided "
+            "brand logo and correct brand name. Keep the exact card design, color scheme, "
+            "paper texture, and print quality. Only change logo and name."
         ),
-        "logo_placement": "centered on white card face; name fills the colored face",
-        "logo_color": "dark on white face; high-contrast on colored face",
-        "logo_size": "40% of the white face logo zone",
-        "material": "letterpress or offset print on thick card stock",
-        "style": "luxury business card, premium print quality",
+        "placeholder_description": "placeholder logo and brand name on luxury thick business card",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "replace_brand_name_text": True,
+            "maintain_card_layout": True,
+            "convert_style": {
+                "type": "letterpress or offset print on thick card stock",
+                "logo_color": "dark on white face; high-contrast on colored face",
+                "text_rendering": "premium typography, brand name in large type on colored face",
+                "finish": "luxury print quality, subtle emboss or deboss",
+            },
+        },
+        "environment": {
+            "card_surfaces": {"preserve_color": True, "preserve_texture": True, "preserve_layout": True},
+            "background": {"preserve_exactly": True},
+            "lighting": {"preserve_direction": True, "preserve_shadows": True},
+        },
+        "constraints": [
+            "only replace logo mark and brand name text",
+            "keep both card faces identical in design",
+            "keep paper texture and print quality",
+            "no watermark",
+        ],
+        "style": "luxury business card, premium letterpress quality, photorealistic paper texture",
     },
     "tote_bag": {
-        "scene": (
-            "Natural canvas tote bag with brand logo screen-printed on the front panel. "
-            "Woven fabric texture is visible through the ink."
+        "goal": (
+            "Replace the existing logo screen-printed on the canvas tote bag with the provided "
+            "brand logo. Maintain exact size, position, canvas fabric texture interaction, "
+            "and print style. Only change the logo artwork."
         ),
-        "logo_placement": "centered on the bag face",
-        "logo_color": "contrasting with bag material color",
-        "logo_size": "large, 75% of the logo zone",
-        "material": "screen-print on canvas, fabric texture",
-        "style": "eco merchandise, casual lifestyle",
+        "placeholder_description": "existing screen-printed logo on natural canvas tote bag front panel",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "convert_style": {
+                "type": "screen-print on canvas",
+                "ink_color": "contrasting with natural canvas (dark ink on light canvas)",
+                "fabric_texture": "canvas weave visible through ink",
+                "ink_opacity": "semi-opaque, authentic screen-print look",
+                "finish": "eco merchandise print quality",
+            },
+        },
+        "environment": {
+            "bag": {"preserve_fabric_texture": True, "preserve_color": True, "preserve_shape": True},
+            "background": {"preserve_exactly": True},
+            "lighting": {"preserve_direction": True, "preserve_shadows": True},
+        },
+        "constraints": [
+            "only replace the logo print on the bag face",
+            "keep canvas texture visible through the ink",
+            "keep bag shape, color, handles identical",
+            "no watermark",
+        ],
+        "style": "eco merchandise, casual lifestyle, photorealistic canvas fabric",
     },
     "tshirt": {
-        "scene": (
-            "Light-colored t-shirt with brand logo printed on the chest area. "
-            "Cotton fabric texture visible through the print."
+        "goal": (
+            "Replace the existing logo printed on the light-colored t-shirt chest with the "
+            "provided brand logo. Maintain exact print size, position, fabric texture "
+            "interaction, and DTG/screen-print style. Only change the logo artwork."
         ),
-        "logo_placement": "center chest, slightly above mid-point",
-        "logo_color": "dark/black on light shirt",
-        "logo_size": "medium, 45% of the print zone",
-        "material": "screen-print on cotton",
-        "style": "clean apparel merchandise",
+        "placeholder_description": "existing printed logo on light-colored cotton t-shirt chest area",
+        "logo_replacement": {
+            "replace_existing_logo": True,
+            "maintain_exact_position": True,
+            "maintain_exact_size": True,
+            "convert_style": {
+                "type": "DTG or screen-print on cotton",
+                "ink_color": "dark/black on light shirt",
+                "fabric_texture": "cotton weave visible through ink",
+                "ink_opacity": "solid or semi-transparent, authentic print look",
+                "finish": "clean apparel print quality",
+            },
+        },
+        "environment": {
+            "shirt": {"preserve_color": True, "preserve_fabric_folds": True, "preserve_texture": True},
+            "background": {"preserve_exactly": True},
+            "lighting": {"preserve_direction": True, "preserve_shadows": True},
+        },
+        "constraints": [
+            "only replace the chest print artwork",
+            "keep exact print size and position",
+            "keep fabric texture and shirt folds identical",
+            "keep shirt color unchanged",
+            "no watermark",
+        ],
+        "style": "clean apparel merchandise, photorealistic cotton fabric",
     },
     "x_account": {
-        "scene": (
-            "X (Twitter) profile page screenshot. Profile banner shows brand imagery. "
-            "Avatar is a rounded-square with light background and dark logo. "
-            "Username display shows the brand name."
+        "goal": (
+            "Replace the existing profile avatar logo and banner branding on the X (Twitter) "
+            "profile page with the provided brand logo and brand name. Keep the exact same "
+            "UI layout, screen composition, and digital rendering. Only change logo and name."
         ),
-        "logo_placement": "rounded avatar on light background; banner shows brand imagery",
-        "logo_color": "dark on light avatar background; any color on banner",
-        "logo_size": "70% of the avatar zone",
-        "material": "digital, flat design",
-        "style": "social media profile, digital platform UI",
+        "placeholder_description": "placeholder avatar and banner branding on X profile page screenshot",
+        "logo_replacement": {
+            "replace_avatar_logo": True,
+            "replace_banner_branding": True,
+            "replace_display_name": True,
+            "convert_style": {
+                "type": "flat digital UI",
+                "avatar_background": "light background, rounded square crop",
+                "logo_color": "dark logo on light avatar background",
+                "banner": "brand primary color or brand imagery",
+                "finish": "crisp digital render, screen pixel quality",
+            },
+        },
+        "environment": {
+            "profile_layout": {"preserve_ui_chrome": True, "preserve_all_other_elements": True},
+            "screen": {"preserve_exactly": True},
+        },
+        "constraints": [
+            "only replace avatar, banner branding, and display name",
+            "keep all other UI elements identical",
+            "keep exact layout and proportions",
+            "no watermark",
+        ],
+        "style": "social media profile, digital platform UI, photorealistic screen render",
     },
 }
 
@@ -1207,77 +1423,81 @@ def build_mockup_prompt(
     zone_text: str = "",
 ) -> str:
     """
-    Build the full art-direction prompt for Gemini mockup reconstruction.
+    Build a structured JSON prompt for Gemini mockup logo replacement.
 
-    Zone coordinates (extracted from the processed image by Pillow) are embedded
-    as plain text so Gemini knows exactly where to place each brand asset without
-    ever seeing the processed/placeholder image.
+    The approach: originals/ images show the mockup WITH an existing placeholder
+    logo (demonstrating the correct material/3D style). The AI task is to
+    REPLACE that placeholder logo with the provided brand logo — keeping everything
+    else identical (lighting, shadows, perspective, material treatment).
 
-    Args:
-        mockup_key: Key into MOCKUP_PROMPTS for scene-specific art direction.
-        assets:     DirectionAssets for this brand direction.
-        brand_name: Brand name string.
-        zone_text:  Output of _zones_to_text() — pixel coordinates of each zone.
+    Output is a JSON string (IMAGE_GEN_V1 format) which Gemini image editing
+    handles with high precision compared to natural-language prompts.
+
+    Zone coordinates from processed/ images are embedded as pixel hints.
     """
     direction   = assets.direction
     spec        = MOCKUP_PROMPTS.get(mockup_key, {})
     primary_hex = direction.colors[0].hex if direction.colors else "#333333"
     colors_desc = ", ".join(c.hex for c in direction.colors[:3]) if direction.colors else primary_hex
 
-    system_context = (
-        "THIS IS A PHOTO EDITING TASK — NOT AN IMAGE GENERATION TASK.\n"
-        "You will receive an existing high-quality photograph. "
-        "Your only job is to minimally edit that photo by placing brand assets "
-        "into specific pixel zones. Everything else stays exactly the same.\n\n"
-        "CRITICAL RULES:\n"
-        "  1. The output image MUST look like the original photo with small targeted edits.\n"
-        "  2. DO NOT redraw, repaint, or regenerate the scene. DO NOT invent new backgrounds.\n"
-        "  3. Preserve 100% of the original photo EXCEPT inside the designated zones.\n"
-        "  4. Lighting, shadows, camera angle, materials, background, and composition "
-        "must be pixel-identical to the original outside the zones.\n"
-        "  5. Inside each zone: integrate brand assets so they look like they were "
-        "physically printed, painted, or applied to the surface "
-        "(e.g. screen-print on fabric, vinyl on wall, etch on acrylic).\n"
-        "  6. Output a single photorealistic image only. No captions, no watermarks.\n\n"
-    )
+    # Build the logo_replacement block, injecting brand colors where needed
+    logo_repl = dict(spec.get("logo_replacement", {
+        "replace_existing_logo": True,
+        "maintain_exact_position": True,
+        "maintain_exact_size": True,
+    }))
+    # Inject brand primary color into convert_style if present
+    if "convert_style" in logo_repl:
+        cs = dict(logo_repl["convert_style"])
+        if "color" in cs and cs["color"] in ("brand primary color", "white or brand primary color"):
+            cs["color"] = f"{primary_hex} (brand primary) or white"
+        logo_repl["convert_style"] = cs
 
-    brand_brief = (
-        f"BRAND IDENTITY:\n"
-        f"  Brand name    : {brand_name}\n"
-        f"  Primary color : {primary_hex}\n"
-        f"  Color palette : {colors_desc}\n"
-        f"  Direction mood: {direction.direction_name}\n\n"
-    )
+    prompt_dict = {
+        "IMAGE_GEN_V1": {
+            "task": "image_edit",
+            "goal": spec.get("goal", (
+                "Replace the existing placeholder logo in the reference photo with the "
+                "provided brand logo. Keep the exact same style, size, placement, "
+                "lighting, and material treatment. Only change the logo shape."
+            )),
+            "brand": {
+                "name": brand_name,
+                "primary_color": primary_hex,
+                "palette": colors_desc,
+                "creative_direction": direction.direction_name,
+            },
+            "composition": {
+                "aspect_ratio": "original image ratio",
+                "preserve_layout": True,
+                "preserve_scale": True,
+                "preserve_perspective": True,
+                "preserve_camera_angle": True,
+                "preserve_spacing": True,
+            },
+            "logo_replacement": logo_repl,
+            "environment": spec.get("environment", {"preserve_all_non_logo_elements": True}),
+            "style": spec.get("style", "ultra photorealistic, premium commercial quality"),
+            "constraints": spec.get("constraints", [
+                "only replace the logo shape",
+                "keep exact size and placement",
+                "keep exact lighting and shadows",
+                "no extra elements",
+                "no watermark",
+            ]),
+            "output": {
+                "resolution": "4K or highest available",
+                "format": "png",
+                "quality": "ultra high",
+            },
+        }
+    }
 
-    zone_section = ""
+    # Embed zone pixel coordinates as a placement hint (optional but helpful)
     if zone_text:
-        zone_section = zone_text + "\n\n"
+        prompt_dict["IMAGE_GEN_V1"]["placement_zone_hints"] = zone_text
 
-    mockup_spec = ""
-    if spec:
-        mockup_spec = (
-            f"MOCKUP SCENE & ART DIRECTION:\n"
-            f"  Scene        : {spec.get('scene', '')}\n"
-            f"  Logo placement: {spec.get('logo_placement', 'centered in the logo zone')}\n"
-            f"  Logo color   : {spec.get('logo_color', 'contrasting with background')}\n"
-            f"  Logo size    : {spec.get('logo_size', '60% of the zone')}\n"
-            f"  Material     : {spec.get('material', 'standard print')}\n"
-            f"  Visual style : {spec.get('style', 'professional, clean')}\n\n"
-        )
-
-    instructions = (
-        "STEP-BY-STEP INSTRUCTIONS:\n"
-        "1. Study the original photo (provided after this prompt).\n"
-        "2. Locate each placement zone using the pixel coordinates above.\n"
-        "3. LOGO zone: integrate the brand logo mark (provided after the photo) "
-        "at the specified coordinates — render it naturally on the material.\n"
-        "4. SURFACE / COLOR zone: apply brand primary color or brand imagery.\n"
-        "5. TEXT zone: render the brand name in clean, high-contrast typography.\n"
-        "6. Output the final photorealistic mockup. Identical to the original "
-        "except at the designated zones."
-    )
-
-    return system_context + brand_brief + zone_section + mockup_spec + instructions
+    return json.dumps(prompt_dict, indent=2, ensure_ascii=False)
 
 
 def _ai_reconstruct_mockup(
@@ -1328,29 +1548,30 @@ def _ai_reconstruct_mockup(
         # 1. Full art-direction prompt (includes zone coordinates as text)
         parts.append(genai_types.Part.from_text(text=prompt))
 
-        # 2. Original high-quality photo — the only visual base
+        # 2. Reference mockup photo — shows existing placeholder logo with correct material style
         parts.append(genai_types.Part.from_text(
             text=(
-                "ORIGINAL PHOTO TO EDIT — this is the base image. "
-                "You must keep this photo almost entirely unchanged. "
-                "Only modify the specific pixel zones described above. "
-                "Every other pixel must remain identical to this photo."
+                "REFERENCE MOCKUP PHOTO — this photo shows an existing placeholder logo "
+                "already rendered in the correct material style (3D signage, screen-print, "
+                "etched acrylic, etc.). Your task: replace only that placeholder logo with "
+                "the brand logo provided next. Keep every other pixel in this photo IDENTICAL — "
+                "same lighting, same shadows, same perspective, same background, same material."
             )
         ))
         parts.append(genai_types.Part.from_bytes(
             data=original_bytes, mime_type=original_mime
         ))
 
-        # 3. Brand logo — to be integrated into the logo zone
+        # 3. Brand logo — the flat mark to replace the placeholder
         if logo_path and logo_path.exists() and logo_path.stat().st_size > 100:
             logo_bytes = logo_path.read_bytes()
             parts.append(genai_types.Part.from_text(
                 text=(
-                    "BRAND LOGO — integrate this mark into the LOGO zone described above. "
-                    "Render it as a natural part of the material "
-                    "(e.g. screen-print on fabric, dimensional letters on a wall, "
-                    "etched into acrylic, flat digital on a screen, etc.). "
-                    "Remove any white background from this logo."
+                    "NEW BRAND LOGO — this is the flat logo mark to use as replacement. "
+                    "Swap out the existing placeholder logo in the reference photo with this shape. "
+                    "Convert it to match the same material style as the original placeholder "
+                    "(same 3D treatment, same surface finish, same lighting and shadows). "
+                    "Remove any white or solid background from this logo before applying."
                 )
             ))
             parts.append(genai_types.Part.from_bytes(
@@ -1360,11 +1581,12 @@ def _ai_reconstruct_mockup(
         # 4. Final directive
         parts.append(genai_types.Part.from_text(
             text=(
-                "Now output the edited photo. "
-                "The original photo must be UNCHANGED except inside the brand placement zones. "
-                "The result must look like the same photograph taken from the same angle, "
-                "same lighting, same scene — with the brand assets naturally applied. "
-                "Output the final image only. No text, no captions, no borders."
+                "Execute the logo replacement now. "
+                "Output the final photo with ONLY the placeholder logo swapped out "
+                "for the new brand logo mark. "
+                "Everything else — background, lighting, shadows, materials, perspective, "
+                "camera angle, all other objects — must be pixel-perfect identical to the reference photo. "
+                "Output the final image only. No captions, no borders, no watermarks."
             )
         ))
 
