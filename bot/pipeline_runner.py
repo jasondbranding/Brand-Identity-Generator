@@ -33,15 +33,40 @@ from typing import Callable, Dict, List, Optional
 
 @dataclass
 class PipelineResult:
-    """Output from a pipeline run."""
+    """Output from a full pipeline run."""
     success: bool
     output_dir: Path
     directions_md: Optional[Path] = None
     directions_json: Optional[Path] = None
-    stylescape_paths: Dict[int, Path] = field(default_factory=dict)  # option_num → stylescape PNG
-    palette_pngs: List[Path] = field(default_factory=list)           # per-direction palette strips
-    shades_pngs: List[Path] = field(default_factory=list)            # per-direction shade scales
-    image_files: List[Path] = field(default_factory=list)            # all PNGs (logos, bg, patterns)
+    stylescape_paths: Dict[int, Path] = field(default_factory=dict)
+    palette_pngs: List[Path] = field(default_factory=list)
+    shades_pngs: List[Path] = field(default_factory=list)
+    image_files: List[Path] = field(default_factory=list)
+    error: str = ""
+    elapsed_seconds: float = 0.0
+
+
+@dataclass
+class LogosPhaseResult:
+    """Output from Phase 1: concept ideation + director + logos only."""
+    success: bool
+    output_dir: Path
+    directions_output: Optional[object] = None   # BrandDirectionsOutput
+    all_assets: Dict[int, object] = field(default_factory=dict)  # option_num → DirectionAssets
+    directions_json: Optional[Path] = None
+    error: str = ""
+    elapsed_seconds: float = 0.0
+
+
+@dataclass
+class AssetsPhaseResult:
+    """Output from Phase 2: full assets for ONE chosen direction."""
+    success: bool
+    output_dir: Path
+    assets: Optional[object] = None              # DirectionAssets
+    stylescape_path: Optional[Path] = None
+    palette_png: Optional[Path] = None
+    image_files: List[Path] = field(default_factory=list)
     error: str = ""
     elapsed_seconds: float = 0.0
 
@@ -76,6 +101,200 @@ class PipelineRunner:
             on_progress,
             generate_images,
         )
+
+    # ── Phase 1: logos only ───────────────────────────────────────────────────
+
+    async def run_logos_phase(
+        self,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback] = None,
+        refinement_feedback: Optional[str] = None,
+    ) -> LogosPhaseResult:
+        """Phase 1: concept ideation + director + 4 logos only (fast ~2-3 min)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._run_logos_sync, brief_dir, on_progress, refinement_feedback
+        )
+
+    def _run_logos_sync(
+        self,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback],
+        refinement_feedback: Optional[str] = None,
+    ) -> LogosPhaseResult:
+        start = time.time()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path("outputs") / f"bot_{timestamp}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            self._progress(on_progress, "📋 *Step 1/3* — Đang đọc brief\\.\\.\\.")
+            from src.parser import parse_brief
+            brief = parse_brief(str(brief_dir), mode="full")
+
+            self._progress(on_progress, "🔍 *Step 2/3* — Research \\+ concept ideation\\.\\.\\.")
+            research_context = ""
+            try:
+                from src.validate import BriefValidator
+                validator = BriefValidator(self.api_key)
+                ctx = validator._extract_from_brief(brief)
+                if not ctx.is_complete():
+                    ctx = validator._infer_missing(brief, ctx)
+                ctx.confirmed = True
+                market_context_str = ctx.to_research_prompt()
+            except Exception:
+                market_context_str = ""
+
+            try:
+                from src.researcher import BrandResearcher
+                researcher = BrandResearcher(self.api_key)
+                res = researcher.research(brief.brief_text, brief.keywords,
+                                          market_context=market_context_str or None)
+                research_context = res.to_director_context()
+            except Exception:
+                pass
+
+            concept_cores = []
+            style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
+            try:
+                from src.director import generate_concept_cores
+                concept_cores = generate_concept_cores(brief)
+            except Exception:
+                pass
+
+            self._progress(on_progress, "🎨 *Step 3/3* — Director \\+ generating 4 logos\\.\\.\\.")
+            from src.director import generate_directions, BrandDirectionsOutput
+            directions_output = generate_directions(
+                brief,
+                research_context=research_context,
+                concept_cores=concept_cores or None,
+                style_ref_paths=style_ref_images or None,
+                refinement_feedback=refinement_feedback or None,
+            )
+
+            directions_json = output_dir / "directions.json"
+            _write_directions_json(directions_output, directions_json)
+
+            from src.generator import generate_all_assets
+            all_assets = generate_all_assets(
+                directions_output.directions,
+                output_dir=output_dir,
+                brief_keywords=brief.keywords,
+                brand_name=getattr(brief, "brand_name", ""),
+                brief_text=getattr(brief, "brief_text", ""),
+                moodboard_images=getattr(brief, "moodboard_images", None) or None,
+                style_ref_images=style_ref_images or None,
+                logo_only=True,
+            )
+
+            return LogosPhaseResult(
+                success=True,
+                output_dir=output_dir,
+                directions_output=directions_output,
+                all_assets=all_assets,
+                directions_json=directions_json,
+                elapsed_seconds=time.time() - start,
+            )
+
+        except Exception as e:
+            import traceback
+            return LogosPhaseResult(
+                success=False,
+                output_dir=output_dir,
+                error=f"{e}\n\n{traceback.format_exc()}",
+                elapsed_seconds=time.time() - start,
+            )
+
+    # ── Phase 2: full assets for one direction ────────────────────────────────
+
+    async def run_assets_phase(
+        self,
+        direction: object,
+        output_dir: Path,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> AssetsPhaseResult:
+        """Phase 2: bg + pattern + palette + mockup + stylescape for ONE chosen direction."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._run_assets_sync, direction, output_dir, brief_dir, on_progress
+        )
+
+    def _run_assets_sync(
+        self,
+        direction: object,
+        output_dir: Path,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback],
+    ) -> AssetsPhaseResult:
+        start = time.time()
+        try:
+            from src.parser import parse_brief
+            brief = parse_brief(str(brief_dir), mode="full")
+            style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
+
+            self._progress(on_progress,
+                f"🖼 *Phase 2* — Generating pattern \\+ palette \\+ background\\.\\.\\.")
+            from src.generator import generate_single_direction_assets
+            assets = generate_single_direction_assets(
+                direction=direction,
+                output_dir=output_dir,
+                brief_keywords=getattr(brief, "keywords", None),
+                brand_name=getattr(brief, "brand_name", ""),
+                brief_tagline=getattr(brief, "tagline", ""),
+                brief_ad_slogan=getattr(brief, "ad_slogan", ""),
+                brief_announcement_copy=getattr(brief, "announcement_copy", ""),
+                brief_text=getattr(brief, "brief_text", ""),
+                moodboard_images=getattr(brief, "moodboard_images", None) or None,
+                style_ref_images=style_ref_images or None,
+            )
+
+            self._progress(on_progress, "🧩 *Phase 2* — Compositing mockups\\.\\.\\.")
+            try:
+                from src.mockup_compositor import composite_all_mockups
+                mockup_results = composite_all_mockups({direction.option_number: assets})
+                assets.mockups = mockup_results.get(direction.option_number)
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Mockups skipped: {e}")
+
+            try:
+                from src.social_compositor import generate_social_posts
+                generate_social_posts({direction.option_number: assets})
+            except Exception:
+                pass
+
+            self._progress(on_progress, "🗂 *Phase 2* — Assembling stylescape\\.\\.\\.")
+            stylescape_path = None
+            try:
+                from src.compositor import build_all_stylescapes
+                ss_map = build_all_stylescapes({direction.option_number: assets}, output_dir=output_dir)
+                stylescape_path = ss_map.get(direction.option_number)
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Stylescape skipped: {e}")
+
+            image_files = sorted(
+                p for p in output_dir.glob("**/*.png")
+                if p.is_file() and p.stat().st_size > 500
+            )
+
+            return AssetsPhaseResult(
+                success=True,
+                output_dir=output_dir,
+                assets=assets,
+                stylescape_path=stylescape_path,
+                palette_png=getattr(assets, "palette_png", None),
+                image_files=image_files,
+                elapsed_seconds=time.time() - start,
+            )
+
+        except Exception as e:
+            import traceback
+            return AssetsPhaseResult(
+                success=False,
+                output_dir=output_dir,
+                error=f"{e}\n\n{traceback.format_exc()}",
+                elapsed_seconds=time.time() - start,
+            )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

@@ -82,7 +82,14 @@ logger = logging.getLogger(__name__)
     CONFIRM,
     REF_CHOICE,
     REF_UPLOAD,
-) = range(15)
+    LOGO_REVIEW,
+) = range(16)
+
+# context.user_data keys for HITL state
+DIRECTIONS_KEY   = "directions_output"
+ALL_ASSETS_KEY   = "all_assets"
+OUTPUT_DIR_KEY   = "pipeline_output_dir"
+LOGO_REVIEW_FLAG = "awaiting_logo_review"
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -1574,7 +1581,7 @@ async def _launch_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data[TEMP_DIR_KEY] = str(brief_dir)
 
     asyncio.create_task(
-        _run_pipeline_and_respond(
+        _run_pipeline_phase1(
             context=context,
             chat_id=chat_id,
             progress_msg_id=progress_msg.message_id,
@@ -1609,28 +1616,27 @@ async def step_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
     return await step_ref_choice_show(update, context)
 
 
-# ── Pipeline execution + result delivery ──────────────────────────────────────
+# ── Pipeline Phase 1: concept ideation + 4 logos ──────────────────────────────
 
-async def _run_pipeline_and_respond(
+async def _run_pipeline_phase1(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     progress_msg_id: int,
     brief: ConversationBrief,
     brief_dir: Path,
     api_key: str,
+    refinement_feedback: Optional[str] = None,
 ) -> None:
-    """Run pipeline, send progress updates, deliver results."""
+    """Run Phase 1: concept ideation + director + 4 logos only. Then enter HITL selection."""
 
     def on_progress(msg: str) -> None:
-        """Sync callback from pipeline thread → schedule async edit."""
         asyncio.create_task(safe_edit(context, chat_id, progress_msg_id, msg))
 
     runner = PipelineRunner(api_key=api_key)
-    result = await runner.run(
+    result = await runner.run_logos_phase(
         brief_dir=brief_dir,
-        mode=brief.mode,
         on_progress=on_progress,
-        generate_images=True,
+        refinement_feedback=refinement_feedback,
     )
 
     if not result.success:
@@ -1645,125 +1651,319 @@ async def _run_pipeline_and_respond(
     elapsed = result.elapsed_seconds
     mins = int(elapsed // 60)
     secs = int(elapsed % 60)
-
-    # Update progress to done
     await safe_edit(
         context, chat_id, progress_msg_id,
-        f"✅ *Done\\!* {mins}m {secs}s\n\nĐang gửi kết quả\\.\\.\\."
+        f"✅ *4 logo hoàn thành\\!* {mins}m {secs}s\n\nĐang gửi\\.\\.\\."
     )
 
-    # ── Send text summary (directions.md) ─────────────────────────────────────
-    if result.directions_md and result.directions_md.exists():
-        await context.bot.send_document(
-            chat_id=chat_id,
-            document=open(result.directions_md, "rb"),
-            filename=f"{brief.brand_name.lower()}_directions.md",
-            caption="📄 Brand directions summary",
+    # Store state for Phase 2 / HITL
+    context.user_data[DIRECTIONS_KEY] = result.directions_output
+    context.user_data[ALL_ASSETS_KEY] = result.all_assets
+    context.user_data[OUTPUT_DIR_KEY] = str(result.output_dir)
+
+    # ── Send 4 logos as media group ───────────────────────────────────────────
+    from telegram import InputMediaPhoto
+    media_group = []
+    for opt_num in sorted(result.all_assets.keys()):
+        assets = result.all_assets[opt_num]
+        direction = next(
+            (d for d in result.directions_output.directions if d.option_number == opt_num),
+            None,
         )
-
-    # ── Generate + send PDF ───────────────────────────────────────────────────
-    try:
-        from src.parser import parse_brief as _parse
-        from src.director import generate_directions as _gen_dir
-
-        # Re-load directions output from saved JSON if available
-        json_path = result.output_dir / "directions.json"
-        if json_path.exists():
-            import json
-            from src.director import BrandDirectionsOutput, BrandDirection
-            data = json.loads(json_path.read_text())
-            directions_output = BrandDirectionsOutput(
-                directions=[BrandDirection(**d) for d in data.get("directions", [])]
+        if direction and assets.logo and assets.logo.exists():
+            caption = (
+                f"*{opt_num}\\. {escape_md(direction.direction_name)}*\n"
+                f"_{escape_md(direction.rationale[:100])}_"
             )
-        else:
-            directions_output = None
-
-        if directions_output:
-            pdf_path = generate_pdf_report(
-                directions_output,
-                result.output_dir,
-                result.image_files,
-                brand_name=brief.brand_name,
-            )
-            if pdf_path and pdf_path.exists():
-                await context.bot.send_document(
-                    chat_id=chat_id,
-                    document=open(pdf_path, "rb"),
-                    filename=pdf_path.name,
-                    caption=f"📊 {brief.brand_name} — Brand Identity Report",
+            media_group.append(
+                InputMediaPhoto(
+                    media=open(assets.logo, "rb"),
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
-    except Exception as e:
-        logger.warning(f"PDF generation failed: {e}")
+            )
 
-    # ── Send stylescapes first (highest value output) ─────────────────────────
-    if result.stylescape_paths:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🗂 *Stylescapes* \\({len(result.stylescape_paths)} directions\\)\\:",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        for opt_num, ss_path in sorted(result.stylescape_paths.items()):
-            if ss_path.exists():
+    if media_group:
+        try:
+            await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+        except Exception as e:
+            logger.warning(f"Media group send failed, sending individually: {e}")
+            for item in media_group:
                 try:
-                    await context.bot.send_document(
+                    await context.bot.send_photo(
                         chat_id=chat_id,
-                        document=open(ss_path, "rb"),
-                        filename=ss_path.name,
-                        caption=f"Option {opt_num} stylescape",
+                        photo=item.media,
+                        caption=item.caption,
+                        parse_mode=ParseMode.MARKDOWN_V2,
                     )
                 except Exception:
                     pass
 
-    # ── Send palette strips ────────────────────────────────────────────────────
-    if result.palette_pngs:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="🎨 *Color Palettes*\\:",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        for p in result.palette_pngs:
-            try:
-                await context.bot.send_document(
-                    chat_id=chat_id,
-                    document=open(p, "rb"),
-                    filename=p.name,
-                )
-            except Exception:
-                pass
-
-    # ── Send shade scales ──────────────────────────────────────────────────────
-    if result.shades_pngs:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="🌈 *Shade Scales \\(50→950\\)*\\:",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        for p in result.shades_pngs:
-            try:
-                await context.bot.send_document(
-                    chat_id=chat_id,
-                    document=open(p, "rb"),
-                    filename=p.name,
-                )
-            except Exception:
-                pass
-
-    # ── Send remaining image files (logos, backgrounds, patterns) ─────────────
-    # Exclude already-sent files to avoid duplication
-    sent_paths = (
-        set(str(p) for p in result.stylescape_paths.values())
-        | set(str(p) for p in result.palette_pngs)
-        | set(str(p) for p in result.shades_pngs)
+    # ── Show HITL selection keyboard ──────────────────────────────────────────
+    option_nums = sorted(result.all_assets.keys())
+    select_row = [
+        InlineKeyboardButton(f"✅ Chọn {i}", callback_data=f"logo_select_{i}")
+        for i in option_nums
+    ]
+    kb = InlineKeyboardMarkup([
+        select_row,
+        [InlineKeyboardButton("✏️ Chỉnh sửa / Mô tả thêm", callback_data="logo_refine")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "👆 *4 hướng logo — chọn 1 để tiếp tục, hoặc mô tả chỉnh sửa bằng ngôn ngữ tự nhiên\\.*"
+        ),
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
     )
+
+    # Set flag so global text handler knows to intercept
+    context.user_data[LOGO_REVIEW_FLAG] = True
+
+
+# ── HITL: logo selection callback ─────────────────────────────────────────────
+
+async def step_logo_review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle logo_select_N and logo_refine inline button callbacks."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    chat_id = update.effective_chat.id
+
+    if data == "logo_refine":
+        await query.edit_message_text(
+            "✏️ Mô tả điều chỉnh bạn muốn \\(vd: _\"thêm yếu tố nature, bớt corporate\"_\\)\\:\n\n"
+            "_Bot sẽ tái tạo 4 hướng logo mới theo feedback của bạn\\._",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Keep LOGO_REVIEW_FLAG so the text handler picks up the next message
+        context.user_data[LOGO_REVIEW_FLAG] = True
+        context.user_data["logo_refine_mode"] = True
+        return
+
+    # logo_select_N
+    if data.startswith("logo_select_"):
+        try:
+            chosen_num = int(data.split("_")[-1])
+        except (ValueError, IndexError):
+            await query.edit_message_text("❌ Lựa chọn không hợp lệ\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
+        directions_output = context.user_data.get(DIRECTIONS_KEY)
+        if not directions_output:
+            await query.edit_message_text(
+                "❌ Không tìm thấy dữ liệu directions\\. Gõ /start để bắt đầu lại\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        chosen_direction = next(
+            (d for d in directions_output.directions if d.option_number == chosen_num),
+            None,
+        )
+        if not chosen_direction:
+            await query.edit_message_text(
+                f"❌ Không tìm thấy hướng {chosen_num}\\.", parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+
+        # Clear HITL flag
+        context.user_data[LOGO_REVIEW_FLAG] = False
+        context.user_data.pop("logo_refine_mode", None)
+
+        await query.edit_message_text(
+            f"✅ *Chọn hướng {chosen_num}\\: {escape_md(chosen_direction.direction_name)}*\n\n"
+            f"⏳ Đang gen palette \\+ pattern \\+ mockups\\.\\.\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+        output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
+        brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
+        brief_dir = Path(brief_dir_str) if brief_dir_str else None
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        brief = get_brief(context)
+
+        # Launch Phase 2 as a background task
+        asyncio.create_task(
+            _run_pipeline_phase2(
+                context=context,
+                chat_id=chat_id,
+                chosen_direction=chosen_direction,
+                output_dir=output_dir,
+                brief_dir=brief_dir,
+                brief=brief,
+                api_key=api_key,
+                directions_output=directions_output,
+            )
+        )
+
+
+# ── HITL: free-text logo refinement ───────────────────────────────────────────
+
+async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle free-text refinement when LOGO_REVIEW_FLAG is set."""
+    if not context.user_data.get(LOGO_REVIEW_FLAG):
+        return  # Not in logo review mode — ignore
+
+    text = update.message.text.strip()
+    if not text:
+        return
+
+    chat_id = update.effective_chat.id
+    brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
+    brief_dir = Path(brief_dir_str) if brief_dir_str else None
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    brief = get_brief(context)
+
+    if not brief_dir or not brief_dir.exists():
+        await update.message.reply_text(
+            "❌ Session đã hết hạn\\. Gõ /start để bắt đầu lại\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        context.user_data[LOGO_REVIEW_FLAG] = False
+        return
+
+    # Clear refine mode flag
+    context.user_data.pop("logo_refine_mode", None)
+    context.user_data[LOGO_REVIEW_FLAG] = False
+
+    progress_msg = await update.message.reply_text(
+        f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
+        f"_\"{escape_md(text[:100])}_\"",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+    asyncio.create_task(
+        _run_pipeline_phase1(
+            context=context,
+            chat_id=chat_id,
+            progress_msg_id=progress_msg.message_id,
+            brief=brief,
+            brief_dir=brief_dir,
+            api_key=api_key,
+            refinement_feedback=text,
+        )
+    )
+
+
+# ── Pipeline Phase 2: full assets for chosen direction ────────────────────────
+
+async def _run_pipeline_phase2(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    chosen_direction: object,
+    output_dir: Path,
+    brief_dir: Optional[Path],
+    brief: ConversationBrief,
+    api_key: str,
+    directions_output: object,
+) -> None:
+    """Run Phase 2: bg + pattern + palette + mockup + stylescape for chosen direction."""
+    progress_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text="⏳ *Phase 2 đang chạy\\.\\.\\.*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    progress_msg_id = progress_msg.message_id
+
+    def on_progress(msg: str) -> None:
+        asyncio.create_task(safe_edit(context, chat_id, progress_msg_id, msg))
+
+    runner = PipelineRunner(api_key=api_key)
+    result = await runner.run_assets_phase(
+        direction=chosen_direction,
+        output_dir=output_dir,
+        brief_dir=brief_dir,
+        on_progress=on_progress,
+    )
+
+    if not result.success:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Phase 2 thất bại\\:\n```\n{escape_md(result.error[:500])}\n```",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        if brief_dir:
+            _cleanup(brief_dir)
+        return
+
+    elapsed = result.elapsed_seconds
+    mins = int(elapsed // 60)
+    secs = int(elapsed % 60)
+    await safe_edit(
+        context, chat_id, progress_msg_id,
+        f"✅ *Assets hoàn thành\\!* {mins}m {secs}s\n\nĐang gửi kết quả\\.\\.\\."
+    )
+
+    # ── Generate + send PDF ───────────────────────────────────────────────────
+    try:
+        pdf_path = generate_pdf_report(
+            directions_output,
+            output_dir,
+            result.image_files,
+            brand_name=brief.brand_name,
+        )
+        if pdf_path and pdf_path.exists():
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(pdf_path, "rb"),
+                filename=pdf_path.name,
+                caption=f"📊 {escape_md(brief.brand_name)} — Brand Identity Report",
+            )
+    except Exception as e:
+        logger.warning(f"PDF generation failed: {e}")
+
+    # ── Send stylescape ───────────────────────────────────────────────────────
+    if result.stylescape_path and result.stylescape_path.exists():
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🗂 *Stylescape*\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(result.stylescape_path, "rb"),
+                filename=result.stylescape_path.name,
+                caption=f"Option {chosen_direction.option_number} stylescape",
+            )
+        except Exception as e:
+            logger.warning(f"Stylescape send failed: {e}")
+
+    # ── Send palette strip ────────────────────────────────────────────────────
+    if result.palette_png and result.palette_png.exists():
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🎨 *Color Palette*\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(result.palette_png, "rb"),
+                filename=result.palette_png.name,
+            )
+        except Exception as e:
+            logger.warning(f"Palette send failed: {e}")
+
+    # ── Send remaining images (pattern, mockups) ──────────────────────────────
+    sent_already = set()
+    if result.stylescape_path:
+        sent_already.add(str(result.stylescape_path))
+    if result.palette_png:
+        sent_already.add(str(result.palette_png))
+
     raw_imgs = [
         p for p in result.image_files
-        if str(p) not in sent_paths
-        and p.name not in {"background.png"}     # skip large bg images to save bandwidth
+        if str(p) not in sent_already
+        and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+        and p.name not in {"background.png"}
     ]
     if raw_imgs:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"🖼 *Logos, Patterns \\& Assets* \\({len(raw_imgs)} files\\)\\:",
+            text=f"🖼 *Pattern \\& Mockups* \\({len(raw_imgs)} files\\)\\:",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         from telegram import InputMediaDocument
@@ -1790,16 +1990,20 @@ async def _run_pipeline_and_respond(
                         except Exception:
                             pass
 
+    # ── Done! ─────────────────────────────────────────────────────────────────
+    direction_name = escape_md(getattr(chosen_direction, "direction_name", ""))
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
             f"🎉 *{escape_md(brief.brand_name)}* brand identity hoàn thành\\!\n\n"
+            f"Hướng đã chọn: *{direction_name}*\n\n"
             f"Gõ /start để bắt đầu project mới\\."
         ),
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
-    _cleanup(brief_dir)
+    if brief_dir:
+        _cleanup(brief_dir)
 
 
 def _cleanup(brief_dir: Path) -> None:
@@ -1885,5 +2089,19 @@ def build_app(token: str) -> Application:
     )
 
     app.add_handler(conv)
+
+    # ── Global HITL handlers (outside ConversationHandler) ────────────────────
+    # These fire when the pipeline has finished Phase 1 and set LOGO_REVIEW_FLAG.
+    # They must be registered AFTER the ConversationHandler so they don't
+    # interfere with brief collection.
+    app.add_handler(
+        CallbackQueryHandler(step_logo_review_callback, pattern="^logo_"),
+        group=1,
+    )
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, step_logo_review_text),
+        group=1,
+    )
+
     app.add_error_handler(error_handler)
     return app
