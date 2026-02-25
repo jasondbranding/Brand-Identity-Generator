@@ -1307,9 +1307,41 @@ def _fetch_preview_refs(brief, n: int = 4) -> list:
             return []
 
         kw = list(getattr(brief, "keywords", []) or [])
-        industry = getattr(brief, "industry", "") or ""
-        product  = getattr(brief, "product_service", "") or ""
-        kw_set = {w.lower() for w in (kw + industry.split() + product.split()) if w}
+        # ConversationBrief uses .product (not .product_service / .industry)
+        product = getattr(brief, "product", "") or ""
+        audience = getattr(brief, "audience", "") or ""
+        tone = getattr(brief, "tone", "") or ""
+        kw_set = {w.lower() for w in kw + product.split() + audience.split() + tone.split() if len(w) > 2}
+
+        # Explicit keyword → industry folder mapping for better scoring
+        INDUSTRY_MAP: dict = {
+            "industry_food_beverage":    ["coffee", "cafe", "cafе", "drink", "beverage", "tea",
+                                          "beer", "wine", "food", "restaurant", "bakery", "juice",
+                                          "milk", "water", "snack", "bar", "brew", "roast", "latte"],
+            "industry_fashion_beauty":   ["fashion", "beauty", "clothing", "apparel", "cosmetic",
+                                          "makeup", "skincare", "hair", "luxury", "style", "wear",
+                                          "shoe", "bag", "jewelry", "perfume", "fragrance"],
+            "industry_finance_crypto":   ["finance", "fintech", "crypto", "bank", "invest", "fund",
+                                          "insurance", "payment", "wallet", "trading", "money"],
+            "industry_healthcare_wellness": ["health", "wellness", "medical", "pharma", "clinic",
+                                             "fitness", "yoga", "sport", "gym", "supplement", "care"],
+            "industry_technology_saas":  ["tech", "software", "saas", "app", "digital", "ai",
+                                          "cloud", "data", "platform", "startup", "code", "developer"],
+            "industry_education_edtech": ["education", "learn", "school", "course", "training",
+                                          "university", "academy", "edtech", "tutor", "study"],
+            "industry_media_gaming":     ["media", "gaming", "game", "entertainment", "music",
+                                          "video", "stream", "podcast", "creative", "art", "studio"],
+            "industry_retail_ecommerce": ["retail", "shop", "store", "ecommerce", "brand",
+                                          "product", "market", "sell", "commerce"],
+            "industry_real_estate":      ["real estate", "property", "home", "house", "architect",
+                                          "interior", "construction", "living", "space"],
+        }
+        # Boost score for folders matching product/keyword industry
+        industry_boosts: dict = {}
+        for folder, markers in INDUSTRY_MAP.items():
+            for marker in markers:
+                if marker in kw_set or any(marker in w for w in kw_set):
+                    industry_boosts[folder] = industry_boosts.get(folder, 0) + 3
 
         # Score every category dir
         scored: list = []
@@ -1317,18 +1349,25 @@ def _fetch_preview_refs(brief, n: int = 4) -> list:
             if not sub.is_dir() or not (sub / "index.json").exists():
                 continue
             cat_words = set(sub.name.lower().replace("-", "_").split("_"))
+            # Remove generic stop words that appear in every industry folder name
+            cat_words.discard("industry")
             cat_score = len(kw_set & cat_words)
+            folder_boost = industry_boosts.get(sub.name, 0)
             try:
                 index = _json.loads((sub / "index.json").read_text())
                 for fname, entry in index.items():
                     tags = entry.get("tags", {})
                     all_tags: set = set()
                     for lst_key in ("style", "industry", "mood", "technique"):
-                        for t in tags.get(lst_key, []):
-                            all_tags.update(t.lower().split())
+                        val = tags.get(lst_key, [])
+                        if isinstance(val, list):
+                            for t in val:
+                                all_tags.update(t.lower().split())
+                        elif isinstance(val, str):
+                            all_tags.update(val.lower().split())
                     tag_overlap = len(kw_set & all_tags)
-                    quality     = tags.get("quality", 5)
-                    score       = cat_score * 2 + tag_overlap + quality / 10.0
+                    quality     = tags.get("quality", 5) if isinstance(tags.get("quality"), (int, float)) else 5
+                    score       = folder_boost + cat_score * 2 + tag_overlap + quality / 10.0
                     rel  = entry.get("relative_path", "")
                     absp = entry.get("local_path", "")
                     resolved = str(project_root / rel) if rel else absp
@@ -1497,20 +1536,33 @@ async def step_ref_upload_handler(update: Update, context: ContextTypes.DEFAULT_
     import tempfile
 
     message = update.message
-    if not message or not message.photo:
+    if not message:
+        return REF_UPLOAD
+
+    # Resolve file_id + filename regardless of whether user sends photo or document
+    file_id: str = ""
+    save_name: str = "user_ref.jpg"
+    if message.photo:
+        # Compressed photo — take highest resolution
+        photo = message.photo[-1]
+        file_id = photo.file_id
+        save_name = f"user_ref_{file_id}.jpg"
+    elif message.document and message.document.mime_type and message.document.mime_type.startswith("image/"):
+        # Image sent as file (uncompressed)
+        file_id = message.document.file_id
+        save_name = message.document.file_name or f"user_ref_{file_id}.jpg"
+    else:
         await message.reply_text(
             "⚠️ Vui lòng gửi ảnh\\. Hoặc gõ /skip để bỏ qua\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return REF_UPLOAD
 
-    # Get highest resolution version
-    photo = message.photo[-1]
-    file_obj = await context.bot.get_file(photo.file_id)
+    file_obj = await context.bot.get_file(file_id)
 
     # Save to temp dir
     tmp_dir = _Path(tempfile.mkdtemp(prefix="ref_upload_"))
-    save_path = tmp_dir / f"user_ref_{photo.file_id}.jpg"
+    save_path = tmp_dir / save_name
     await file_obj.download_to_drive(str(save_path))
 
     # Accumulate uploads (user may send 2)
