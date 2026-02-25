@@ -253,23 +253,41 @@ def _generate_image(
                         f"  [dim]Using {len(ref_images)} reference image(s) for logo inspiration[/dim]"
                     )
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash-exp-image-generation",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE", "TEXT"],
-            ),
-        )
+        # Model ladder: Nano Banana → Nano Banana Pro → legacy exp
+        _gen_models = [
+            "gemini-2.5-flash-image",               # Nano Banana — fast, great quality
+            "gemini-3-pro-image-preview",           # Nano Banana Pro — best quality
+            "gemini-2.0-flash-exp-image-generation", # legacy fallback
+        ]
+        response = None
+        _used_model = _gen_models[0]
+        for _gm in _gen_models:
+            try:
+                response = client.models.generate_content(
+                    model=_gm,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                    ),
+                )
+                _used_model = _gm
+                break
+            except Exception as _me:
+                if any(k in str(_me).lower() for k in ("not found", "permission", "not supported", "invalid")):
+                    continue
+                raise
 
-        for candidate in response.candidates or []:
-            for part in candidate.content.parts or []:
-                if hasattr(part, "inline_data") and part.inline_data:
-                    data = part.inline_data.data
-                    if isinstance(data, str):
-                        data = base64.b64decode(data)
-                    save_path.write_bytes(data)
-                    console.print(f"  [green]✓ {label}[/green] (Gemini) → {save_path.name}")
-                    return save_path
+        if response is not None:
+            for candidate in response.candidates or []:
+                for part in candidate.content.parts or []:
+                    if hasattr(part, "inline_data") and part.inline_data:
+                        data = part.inline_data.data
+                        if isinstance(data, str):
+                            data = base64.b64decode(data)
+                        save_path.write_bytes(data)
+                        short = _used_model.replace("gemini-", "").replace("-image-generation", "").replace("-image", "")
+                        console.print(f"  [green]✓ {label}[/green] ({short}) → {save_path.name}")
+                        return save_path
 
         console.print(f"  [yellow]⚠ No image returned for {label} (attempt 1)[/yellow]")
 
@@ -285,22 +303,27 @@ def _generate_image(
         )
         try:
             client2 = genai.Client(api_key=api_key)
-            response2 = client2.models.generate_content(
-                model="gemini-2.0-flash-exp-image-generation",
-                contents=simple_pattern_prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                ),
-            )
-            for candidate in response2.candidates or []:
-                for part in candidate.content.parts or []:
-                    if hasattr(part, "inline_data") and part.inline_data:
-                        data = part.inline_data.data
-                        if isinstance(data, str):
-                            data = base64.b64decode(data)
-                        save_path.write_bytes(data)
-                        console.print(f"  [green]✓ {label}[/green] (Gemini simple) → {save_path.name}")
-                        return save_path
+            for _gm2 in ["gemini-2.5-flash-image", "gemini-2.0-flash-exp-image-generation"]:
+                try:
+                    response2 = client2.models.generate_content(
+                        model=_gm2,
+                        contents=simple_pattern_prompt,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["IMAGE", "TEXT"],
+                        ),
+                    )
+                    for candidate in response2.candidates or []:
+                        for part in candidate.content.parts or []:
+                            if hasattr(part, "inline_data") and part.inline_data:
+                                data = part.inline_data.data
+                                if isinstance(data, str):
+                                    data = base64.b64decode(data)
+                                save_path.write_bytes(data)
+                                console.print(f"  [green]✓ {label}[/green] (simple fallback) → {save_path.name}")
+                                return save_path
+                    break
+                except Exception:
+                    continue
         except Exception as e2:
             console.print(f"  [yellow]⚠ {label} simple fallback also failed ({e2})[/yellow]")
 

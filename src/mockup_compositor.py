@@ -1368,25 +1368,33 @@ def _ai_reconstruct_mockup(
             )
         ))
 
-        # Try preview model first (better at image editing), fall back to exp
-        _model = "gemini-2.0-flash-preview-image-generation"
-        try:
-            response = client.models.generate_content(
-                model=_model,
-                contents=parts,
-                config=genai_types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                ),
-            )
-        except Exception:
-            _model = "gemini-2.0-flash-exp-image-generation"
-            response = client.models.generate_content(
-                model=_model,
-                contents=parts,
-                config=genai_types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                ),
-            )
+        # Model ladder: Nano Banana Pro (best editing) → Nano Banana → legacy exp
+        _models = [
+            "gemini-3-pro-image-preview",          # Nano Banana Pro — highest quality
+            "gemini-2.5-flash-image",              # Nano Banana — fast fallback
+            "gemini-2.0-flash-preview-image-generation",  # legacy fallback
+            "gemini-2.0-flash-exp-image-generation",      # last resort
+        ]
+        response = None
+        _model = _models[0]
+        for _model in _models:
+            try:
+                response = client.models.generate_content(
+                    model=_model,
+                    contents=parts,
+                    config=genai_types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                    ),
+                )
+                break  # success — stop trying
+            except Exception as _me:
+                err_str = str(_me).lower()
+                # Only retry on model-not-found / permission errors, not on content errors
+                if any(k in err_str for k in ("not found", "permission", "not supported", "invalid")):
+                    continue
+                raise  # re-raise unexpected errors (rate limit, etc.)
+        if response is None:
+            return None
 
         for candidate in response.candidates or []:
             for part in candidate.content.parts or []:
