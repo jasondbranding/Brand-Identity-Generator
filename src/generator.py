@@ -132,6 +132,7 @@ def _generate_direction_assets(
         save_path=asset_dir / "pattern.png",
         label="pattern",
         size_hint="square tile, seamlessly repeatable",
+        brief_keywords=brief_keywords,
     )
 
     # Create white / black / transparent logo variants for compositor use
@@ -265,12 +266,17 @@ def _generate_image(
     try:
         client = genai.Client(api_key=api_key)
 
-        # For logos, try to include reference images as style inspiration
+        # For logos and patterns: inject reference images as visual quality anchors
+        # Combined with the style guide text already in full_prompt → uses BOTH sources
         contents: object = full_prompt
-        if label == "logo" and brief_keywords:
-            ref_images = _get_reference_images(brief_keywords, "logos")
+        _ref_type_map = {"logo": "logos", "pattern": "patterns"}
+        if label in _ref_type_map and brief_keywords:
+            ref_type_key = _ref_type_map[label]
+            ref_images = _get_reference_images(brief_keywords, ref_type_key)
             if ref_images:
+                label_noun = "logo" if label == "logo" else "pattern"
                 parts = [types.Part.from_text(text=full_prompt)]
+                loaded = 0
                 for ref_path in ref_images[:3]:
                     try:
                         img_bytes = ref_path.read_bytes()
@@ -278,24 +284,24 @@ def _generate_image(
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
                         parts.append(types.Part.from_text(
                             text=(
-                                "Style reference image (study the quality level and aesthetic approach, "
-                                "do NOT copy this design — create something entirely original):"
+                                f"Quality reference {label_noun} #{loaded+1} — "
+                                "study the craft, execution quality, and aesthetic approach. "
+                                "Do NOT copy this design. Create something entirely original."
                             )
                         ))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
+                        loaded += 1
                     except Exception:
                         pass
-                if len(parts) > 1:
+                if loaded > 0:
                     parts.append(types.Part.from_text(
                         text=(
-                            "Now generate the new logo described above. "
-                            "Create an entirely original design inspired by the quality level."
+                            f"Now generate the new {label_noun} described above. "
+                            "Match the production quality of the references. "
+                            "Create an entirely original design."
                         )
                     ))
                     contents = parts
-                    console.print(
-                        f"  [dim]Using {len(ref_images)} reference image(s) for logo inspiration[/dim]"
-                    )
 
         # Model ladder: Nano Banana → Nano Banana Pro → legacy exp
         _gen_models = [
@@ -376,58 +382,95 @@ def _generate_image(
     return save_path
 
 
-def _get_reference_images(brief_keywords: list, ref_type: str = "logos") -> list:
+def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: int = 3) -> list:
     """
     Find locally cached reference images that match brand keywords.
 
-    Loads references/{ref_type}/index.json and scores entries against keywords.
-    Returns up to 3 matching Path objects.
+    Strategy:
+      1. Score every category subdir by keyword overlap with its folder name
+         (e.g. brief has "fashion" → industry_fashion_beauty scores high)
+      2. Load index.json from each indexed category, score each image by
+         tag overlap + quality
+      3. Return top_n best-matching images as Path objects
+
+    Handles both new relative_path and legacy local_path in index entries.
     """
     try:
-        # Project root is two levels up from src/
         project_root = Path(__file__).parent.parent
-        index_dir = project_root / "references" / ref_type
+        refs_dir = project_root / "references" / ref_type
 
-        if not index_dir.exists():
+        if not refs_dir.exists():
             return []
 
-        from .researcher import BrandResearcher
-        # Use a dummy researcher just for the match_references method (no API needed)
-        class _LocalMatcher:
-            def match_references(self, keywords, index_dir, top_n=3):
-                import json
-                index_path = index_dir / "index.json"
-                if not index_path.exists():
-                    return []
-                try:
-                    index = json.loads(index_path.read_text())
-                except Exception:
-                    return []
-                kw_set = {k.lower().strip() for k in keywords if k}
-                scored = []
-                _proj_root = Path(__file__).parent.parent
-                for filename, entry in index.items():
-                    tags = entry.get("tags", {})
-                    all_tags: set = set()
-                    for lst_key in ("style", "industry", "mood"):
-                        for t in tags.get(lst_key, []):
-                            all_tags.update(t.lower().split())
-                    all_tags.add(tags.get("type", "").lower())
-                    overlap = len(kw_set & all_tags)
-                    quality = tags.get("quality", 5)
-                    score = overlap + quality / 10.0
-                    # Support both relative_path (new) and local_path (legacy absolute)
-                    rel = entry.get("relative_path", "")
-                    abs_p = entry.get("local_path", "")
-                    resolved = str(_proj_root / rel) if rel else abs_p
-                    if resolved and Path(resolved).exists():
-                        scored.append({"local_path": resolved, "score": score})
-                scored.sort(key=lambda x: x["score"], reverse=True)
-                return scored[:top_n]
+        import json as _json
+        kw_set = {k.lower().strip() for k in brief_keywords if k}
+        scored_images: list = []
 
-        matcher = _LocalMatcher()
-        results = matcher.match_references(brief_keywords, index_dir, top_n=3)
-        return [Path(r["local_path"]) for r in results if Path(r["local_path"]).exists()]
+        # ── Collect all indexes: top-level + category subdirs ──────────────
+        index_dirs = []
+
+        # Top-level index (legacy flat structure)
+        if (refs_dir / "index.json").exists():
+            index_dirs.append((refs_dir, 0.0))   # no category bonus
+
+        # Category subdirs — score by name overlap with keywords
+        for sub in refs_dir.iterdir():
+            if not sub.is_dir() or sub.name.startswith(".") or sub.name.startswith("_"):
+                continue
+            if not (sub / "index.json").exists():
+                continue
+            # Score: how many kw words appear in the category folder name
+            cat_words = set(sub.name.lower().replace("-", "_").split("_"))
+            cat_bonus = len(kw_set & cat_words) * 2.0   # category match is a strong signal
+            index_dirs.append((sub, cat_bonus))
+
+        if not index_dirs:
+            return []
+
+        # Sort by category relevance so best categories are searched first
+        index_dirs.sort(key=lambda x: -x[1])
+
+        # ── Score images across all categories ─────────────────────────────
+        for cat_dir, cat_bonus in index_dirs:
+            try:
+                index = _json.loads((cat_dir / "index.json").read_text())
+            except Exception:
+                continue
+
+            for filename, entry in index.items():
+                tags = entry.get("tags", {})
+                # Aggregate all tag values into a flat set
+                all_tags: set = set()
+                for lst_key in ("style", "industry", "mood", "technique"):
+                    for t in tags.get(lst_key, []):
+                        all_tags.update(t.lower().split())
+                # Also include form/motif as tags
+                all_tags.add(str(tags.get("form", tags.get("motif", ""))).lower())
+
+                tag_overlap = len(kw_set & all_tags)
+                quality     = tags.get("quality", 5)
+                score       = cat_bonus + tag_overlap + quality / 10.0
+
+                # Resolve path: new relative_path → legacy local_path
+                rel   = entry.get("relative_path", "")
+                abs_p = entry.get("local_path", "")
+                resolved = str(project_root / rel) if rel else abs_p
+
+                if resolved and Path(resolved).exists():
+                    scored_images.append((score, Path(resolved)))
+
+        # ── Return top_n highest-scoring ───────────────────────────────────
+        scored_images.sort(key=lambda x: -x[0])
+        result = [p for _, p in scored_images[:top_n]]
+
+        if result:
+            cats_used = set()
+            for p in result:
+                cats_used.add(p.parent.name)
+            console.print(
+                f"  [dim]ref images: {len(result)} from {', '.join(sorted(cats_used))}[/dim]"
+            )
+        return result
 
     except Exception:
         return []
