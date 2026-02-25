@@ -373,15 +373,15 @@ def _next_unfilled_state(brief: "ConversationBrief") -> int:
         return PRODUCT
     if not brief.audience:
         return AUDIENCE
-    if not brief.tone:
-        return TONE
-    if not brief.geography:             # same
+    if not brief.geography:
         return GEOGRAPHY
     if not (brief.competitors_direct or brief.competitors_aspirational or brief.competitors_avoid):
         return COMPETITORS
     if not brief.keywords:              # ["-"] is truthy → skips correctly
         return KEYWORDS
-    return MODE_CHOICE
+    if not brief.tone:
+        return TONE
+    return CONFIRM
 
 
 def _state_question_text(state: int) -> str:
@@ -467,13 +467,8 @@ async def _ask_for_state(
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return COLOR_PREFERENCES
-    # MODE_CHOICE or anything beyond → show mode picker
-    await update.message.reply_text(
-        "*Chọn chế độ generate:*",
-        parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=MODE_KEYBOARD,
-    )
-    return MODE_CHOICE
+    # CONFIRM → show brief summary + confirm keyboard
+    return await _send_confirm(update, context, brief)
 
 
 # ── History management ────────────────────────────────────────────────────────
@@ -735,15 +730,8 @@ async def step_brand_name(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Jump ahead past already-filled fields
         next_state = _next_unfilled_state(brief)
         filled_summary = f"✅ Đã điền {filled} field từ input của bạn\\.\n\n"
-        if next_state == MODE_CHOICE:
-            await update.message.reply_text(
-                f"Tuyệt\\! *{escape_md(brief.brand_name)}* 🎯\n\n"
-                f"{filled_summary}"
-                f"*Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await update.message.reply_text(
             f"Tuyệt\\! *{escape_md(brief.brand_name)}* 🎯\n\n{filled_summary}",
             parse_mode=ParseMode.MARKDOWN_V2,
@@ -774,14 +762,8 @@ async def step_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if filled >= 2:
         # Multiple fields detected & filled; jump to next unfilled
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -813,14 +795,8 @@ async def step_audience(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     filled = _parse_bulk_fields(text, brief)
     if filled >= 2:
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -859,13 +835,8 @@ async def step_tone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if data == "tone_skip":
         brief = get_brief(context)
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await query.edit_message_text(
-                "⏭ Tone bỏ qua — AI sẽ tự chọn\\.\n\n*Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await query.edit_message_text(
             f"⏭ Tone bỏ qua — AI sẽ tự chọn\\.\n\n{_state_question_text(next_state)}",
             parse_mode=ParseMode.MARKDOWN_V2,
@@ -885,14 +856,8 @@ async def step_tone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     label = data.replace("tone_", "").replace("_", " ").title()
     next_state = _next_unfilled_state(brief)
 
-    if next_state == MODE_CHOICE:
-        summary_line = f"✅ Tone: *{escape_md(label)}*\n\n*Chọn chế độ generate:*"
-        await query.edit_message_text(
-            summary_line,
-            parse_mode=ParseMode.MARKDOWN_V2,
-            reply_markup=MODE_KEYBOARD,
-        )
-        return MODE_CHOICE
+    if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
 
     # Show tone confirmation then ask next unfilled field in a follow-up message
     await query.edit_message_text(
@@ -928,14 +893,8 @@ async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if filled >= 2:
         context.user_data.pop(TONE_CUSTOM_KEY, None)
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -970,14 +929,8 @@ async def step_core_promise(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     filled = _parse_bulk_fields(text, brief)
     if filled >= 2:
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -1009,14 +962,8 @@ async def step_geography(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     filled = _parse_bulk_fields(text, brief)
     if filled >= 2:
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -1048,14 +995,8 @@ async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     filled = _parse_bulk_fields(text, brief)
     if filled >= 2:
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -1249,14 +1190,8 @@ async def step_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     filled = _parse_bulk_fields(text, brief)
     if filled >= 2:
         next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
+        if next_state == CONFIRM:
+            return await _send_confirm(update, context, brief)
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Đã điền {filled} fields\\.",
@@ -1291,15 +1226,36 @@ async def step_color_preferences(update: Update, context: ContextTypes.DEFAULT_T
     elif text:
         brief.color_preferences = text
     await send_typing(update)
-    await update.message.reply_text(
-        "*Chọn chế độ generate:*",
+    return await _send_confirm(update, context, brief)
+
+
+# ── _send_confirm helper — skip Mode, go directly to confirm screen ───────────
+
+async def _send_confirm(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    brief,
+) -> int:
+    """
+    Auto-set mode to full and show the brief summary + confirm keyboard.
+    Replaces the old MODE_CHOICE step — mode is always 'full'.
+    """
+    brief.mode = "full"
+    summary = brief.summary_text()
+    safe_summary = escape_md(summary).replace("\\*", "*").replace("\\_", "_")
+    chat_id = update.effective_chat.id
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"📋 *Tóm tắt brief:*\n\n{safe_summary}\n\nBạn muốn làm gì?"
+        ),
         parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=MODE_KEYBOARD,
+        reply_markup=CONFIRM_KEYBOARD,
     )
-    return MODE_CHOICE
+    return CONFIRM
 
 
-# ── Step 11: Mode Choice ──────────────────────────────────────────────────────
+# ── Step 11: Mode Choice (kept for legacy compatibility) ──────────────────────
 
 async def step_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -1911,7 +1867,6 @@ def build_app(token: str) -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_keywords),
                 CommandHandler("skip", step_keywords),
             ],
-            MODE_CHOICE: [CallbackQueryHandler(step_mode_callback, pattern="^mode_")],
             CONFIRM:     [CallbackQueryHandler(step_confirm_callback, pattern="^confirm_")],
             REF_CHOICE:  [CallbackQueryHandler(step_ref_choice_callback, pattern="^ref_")],
             REF_UPLOAD:  [
