@@ -19,8 +19,9 @@ Conversation flow:
 
 Commands:
   /start  — start new brand project
+  /new    — alias for /start
+  /reset  — clear current brief and start over from the beginning
   /cancel — cancel current conversation
-  /status — check if pipeline is running
 """
 
 from __future__ import annotations
@@ -165,6 +166,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "Tôi sẽ hỏi bạn một vài câu để xây dựng brief, sau đó AI sẽ generate "
         "brand directions \\+ hình ảnh cho bạn\\.\n\n"
         "Bắt đầu nhé\\! 👇\n\n"
+        "*Tên thương hiệu là gì?*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return BRAND_NAME
+
+
+# ── /reset ────────────────────────────────────────────────────────────────────
+
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reset_brief(context)
+    await update.message.reply_text(
+        "🔄 Brief đã được xoá\\. Bắt đầu lại từ đầu\\!\n\n"
         "*Tên thương hiệu là gì?*",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
@@ -698,7 +711,11 @@ def build_app(token: str) -> Application:
 
     # Conversation handler
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", cmd_start), CommandHandler("new", cmd_start)],
+        entry_points=[
+            CommandHandler("start", cmd_start),
+            CommandHandler("new", cmd_start),
+            CommandHandler("reset", cmd_reset),
+        ],
         states={
             BRAND_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, step_brand_name)],
             PRODUCT:    [MessageHandler(filters.TEXT & ~filters.COMMAND, step_product)],
@@ -735,7 +752,10 @@ def build_app(token: str) -> Application:
             MODE_CHOICE: [CallbackQueryHandler(step_mode_callback, pattern="^mode_")],
             CONFIRM:     [CallbackQueryHandler(step_confirm_callback, pattern="^confirm_")],
         },
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cmd_cancel),
+            CommandHandler("reset", cmd_reset),
+        ],
         allow_reentry=True,
         conversation_timeout=1800,  # 30 min timeout
     )
