@@ -118,6 +118,145 @@ MSG_ID_KEY = "progress_msg_id"
 TEMP_DIR_KEY = "temp_dir"
 TONE_CUSTOM_KEY = "awaiting_tone_custom"
 RUNNER_KEY = "runner"
+HISTORY_KEY = "state_history"
+
+
+# ── Intent detection ──────────────────────────────────────────────────────────
+
+SKIP_PHRASES = {
+    "bỏ qua", "không có", "không biết", "thôi", "skip", "k có", "ko có",
+    "không", "pass", "bỏ", "không cần", "k cần", "ko cần", "chưa có",
+    "để sau", "nope", "n/a", "na", "no", "không điền", "bỏ trống",
+    "để trống", "chưa", "chưa biết", "kh", "tạm bỏ", "bỏ qua đi",
+    "không quan trọng", "chưa nghĩ ra",
+}
+
+BACK_PHRASES = {
+    "back", "quay lại", "back lại", "trở lại", "bước trước",
+    "quay lại bước trước", "sửa lại", "làm lại", "undo", "lùi lại",
+    "đổi lại", "sửa bước trước", "back bước trước", "cho sửa lại",
+    "muốn sửa lại", "sửa câu trước",
+}
+
+
+def detect_intent(text: str) -> Optional[str]:
+    """Detect 'skip' or 'back' from natural language. Returns 'skip', 'back', or None."""
+    normalized = text.strip().lower()
+    if normalized in BACK_PHRASES or any(p in normalized for p in BACK_PHRASES):
+        return "back"
+    if normalized in SKIP_PHRASES:
+        return "skip"
+    # Fuzzy skip for short phrases containing skip keywords
+    if len(normalized) < 25 and any(p in normalized for p in SKIP_PHRASES):
+        return "skip"
+    return None
+
+
+# ── History management ────────────────────────────────────────────────────────
+
+def push_history(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
+    """Push a state onto the back-navigation stack."""
+    history = context.user_data.setdefault(HISTORY_KEY, [])
+    # Don't push duplicates consecutively
+    if not history or history[-1] != state:
+        history.append(state)
+    if len(history) > 8:
+        history.pop(0)
+
+
+def pop_history(context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
+    """Pop the most recent state from history."""
+    history = context.user_data.get(HISTORY_KEY, [])
+    return history.pop() if history else None
+
+
+# Maps each state → (brief_field_to_clear, question_text, optional_keyboard)
+# Used by handle_back() to re-ask the right question.
+def _get_reask_map() -> dict:
+    return {
+        BRAND_NAME: (
+            "brand_name",
+            "*Tên thương hiệu là gì?*",
+            None,
+        ),
+        PRODUCT: (
+            "product",
+            "*Mô tả ngắn về sản phẩm/dịch vụ?*\n"
+            "_\\(ví dụ: SaaS platform giúp logistics track shipments bằng AI\\)_",
+            None,
+        ),
+        AUDIENCE: (
+            "audience",
+            "*Target audience là ai?*\n"
+            "_\\(ví dụ: Ops managers tại mid\\-market e\\-commerce\\)_",
+            None,
+        ),
+        TONE: (
+            "tone",
+            "*Tone/cá tính thương hiệu?*",
+            TONE_KEYBOARD,
+        ),
+        CORE_PROMISE: (
+            "core_promise",
+            "*Core promise / câu tagline định hướng?*\n_Gõ /skip để bỏ qua_",
+            None,
+        ),
+        GEOGRAPHY: (
+            "geography",
+            "*Geography / thị trường mục tiêu?*\n_Gõ /skip để bỏ qua_",
+            None,
+        ),
+        COMPETITORS: (
+            None,
+            "*Đối thủ cạnh tranh?*\n_Gõ /skip để bỏ qua_",
+            None,
+        ),
+        MOODBOARD_NOTES: (
+            "moodboard_notes",
+            "*Moodboard notes?*\n_Gõ /skip để bỏ qua_",
+            None,
+        ),
+        KEYWORDS: (
+            "keywords",
+            "*Keywords thương hiệu?*\n_\\(mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n_Gõ /skip để bỏ qua_",
+            None,
+        ),
+    }
+
+
+async def handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle 'back' intent — pop history and re-ask previous question."""
+    prev_state = pop_history(context)
+    if prev_state is None:
+        await update.message.reply_text(
+            "↩️ Đã ở bước đầu tiên rồi, không thể quay lại thêm\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Re-ask brand name as the earliest possible step
+        await update.message.reply_text("*Tên thương hiệu là gì?*", parse_mode=ParseMode.MARKDOWN_V2)
+        return BRAND_NAME
+
+    reask_map = _get_reask_map()
+    info = reask_map.get(prev_state)
+    if not info:
+        await update.message.reply_text("⚠️ Không thể quay lại bước này\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return prev_state
+
+    field_name, question, keyboard = info
+
+    # Clear that field from brief
+    brief = get_brief(context)
+    if field_name and hasattr(brief, field_name):
+        attr = getattr(brief, field_name)
+        setattr(brief, field_name, [] if isinstance(attr, list) else "")
+
+    await send_typing(update)
+    kwargs: dict = {"parse_mode": ParseMode.MARKDOWN_V2}
+    if keyboard:
+        kwargs["reply_markup"] = keyboard
+
+    await update.message.reply_text(f"↩️ Quay lại\\.\n\n{question}", **kwargs)
+    return prev_state
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -198,7 +337,11 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ── Step 1: Brand Name ────────────────────────────────────────────────────────
 
 async def step_brand_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, BRAND_NAME)
     brief.brand_name = update.message.text.strip()
     await send_typing(update)
     await update.message.reply_text(
@@ -213,7 +356,11 @@ async def step_brand_name(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # ── Step 2: Product ───────────────────────────────────────────────────────────
 
 async def step_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, PRODUCT)
     brief.product = update.message.text.strip()
     await send_typing(update)
     await update.message.reply_text(
@@ -227,7 +374,11 @@ async def step_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 # ── Step 3: Audience ──────────────────────────────────────────────────────────
 
 async def step_audience(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, AUDIENCE)
     brief.audience = update.message.text.strip()
     await send_typing(update)
     await update.message.reply_text(
@@ -288,7 +439,19 @@ async def step_tone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle custom tone text input."""
+    """Handle custom tone text input or natural language intents."""
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
+    if intent == "skip":
+        push_history(context, TONE)
+        await update.message.reply_text(
+            "⏭ Tone bỏ qua\\.\n\n"
+            "*Core promise / câu tagline định hướng?*\n"
+            "_Gõ /skip để bỏ qua_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return CORE_PROMISE
     brief = get_brief(context)
     if context.user_data.pop(TONE_CUSTOM_KEY, False):
         brief.tone = update.message.text.strip()
@@ -307,9 +470,13 @@ async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ── Step 5: Core Promise ──────────────────────────────────────────────────────
 
 async def step_core_promise(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, CORE_PROMISE)
     text = update.message.text.strip()
-    if text.lower() != "/skip":
+    if text.lower() != "/skip" and intent != "skip":
         brief.core_promise = text
     await send_typing(update)
     await update.message.reply_text(
@@ -324,9 +491,13 @@ async def step_core_promise(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 # ── Step 6: Geography ─────────────────────────────────────────────────────────
 
 async def step_geography(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, GEOGRAPHY)
     text = update.message.text.strip()
-    if text.lower() != "/skip":
+    if text.lower() != "/skip" and intent != "skip":
         brief.geography = text
     await send_typing(update)
     await update.message.reply_text(
@@ -344,9 +515,13 @@ async def step_geography(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ── Step 7: Competitors ───────────────────────────────────────────────────────
 
 async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, COMPETITORS)
     text = update.message.text.strip()
-    if text.lower() != "/skip" and text:
+    if text.lower() != "/skip" and intent != "skip" and text:
         import re
         lines = text.splitlines()
         for line in lines:
@@ -379,9 +554,13 @@ async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # ── Step 8: Moodboard Notes ───────────────────────────────────────────────────
 
 async def step_moodboard_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, MOODBOARD_NOTES)
     text = update.message.text.strip()
-    if text.lower() != "/skip":
+    if text.lower() != "/skip" and intent != "skip":
         brief.moodboard_notes = text
     await send_typing(update)
     await update.message.reply_text(
@@ -452,9 +631,13 @@ async def step_moodboard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ── Step 10: Keywords ─────────────────────────────────────────────────────────
 
 async def step_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
     brief = get_brief(context)
+    push_history(context, KEYWORDS)
     text = update.message.text.strip()
-    if text.lower() != "/skip" and text:
+    if text.lower() != "/skip" and intent != "skip" and text:
         import re
         kws = re.split(r"[,\n]+", text)
         brief.keywords = [k.strip().lstrip("-• ") for k in kws if k.strip()]
