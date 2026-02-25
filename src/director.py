@@ -38,6 +38,100 @@ class ColorSwatch(BaseModel):
     role: str = Field(description="One of: primary, secondary, accent, neutral, background")
 
 
+# ── Structured image spec models (JSON → natural language in generator) ───────
+
+class LogoSpec(BaseModel):
+    """Structured render specification for the logo mark. Translated to a natural language prompt by the generator."""
+    logo_type: Literal["symbol", "abstract_mark", "lettermark"] = Field(
+        description=(
+            "Type of mark to generate. "
+            "'symbol' = recognizable icon form (leaf, wave, bean, mountain). "
+            "'abstract_mark' = non-representational geometric / organic form. "
+            "'lettermark' = a single stylised letter with no full words. "
+            "NEVER use 'wordmark' or 'combination mark' — text is forbidden in logo output."
+        )
+    )
+    form: str = Field(
+        description=(
+            "Exact geometric description of the mark. Use precise language: shape primitives, "
+            "dimensions, proportions, angles. "
+            "GOOD: 'two concentric circles, outer 80% canvas width, inner 50%, both 4px stroke'. "
+            "BAD: 'a circular mark suggesting infinity'."
+        )
+    )
+    composition: str = Field(
+        description="Positioning and canvas rules. E.g. 'centered, 20% padding all sides, 800×800px canvas, pure white #FFFFFF background'."
+    )
+    color_hex: str = Field(
+        description=(
+            "EXACTLY ONE hex color code from the palette. "
+            "⚠ MONOCHROME RULE: the logo mark uses ONE color only — no gradients, "
+            "no second color, no tints. Choose the primary palette color."
+        )
+    )
+    color_name: str = Field(
+        description="Descriptive name for the chosen color, e.g. 'Deep Forest Green'."
+    )
+    fill_style: Literal["solid_fill", "outline_only", "fill_with_outline_detail"] = Field(
+        description=(
+            "'solid_fill' = entire mark is a flat filled shape. "
+            "'outline_only' = stroke only, transparent interior. "
+            "'fill_with_outline_detail' = solid fill body with additional outline/cutout elements."
+        )
+    )
+    stroke_weight: str = Field(
+        description="Stroke weight if outline is involved. E.g. '3px', 'hairline 1px', 'bold 6px'. Use 'N/A' for pure solid fill."
+    )
+    render_style: str = Field(
+        description="Visual rendering approach. E.g. 'clean flat vector', 'precise geometric construction', 'organic hand-crafted line'. Never gradient, never 3D unless specified."
+    )
+    metaphor: str = Field(
+        description="What the mark visually suggests or evokes. E.g. 'suggests a coffee bean split open to reveal a mountain contour'. Use 'abstract' if purely geometric with no representational intent."
+    )
+    avoid: List[str] = Field(
+        description="Explicit exclusion list. Always include: 'text', 'letterforms', 'words', 'gradient', 'drop shadow', 'multiple colors', 'photography'."
+    )
+
+
+class PatternSpec(BaseModel):
+    """Structured render specification for the repeating brand pattern tile."""
+    motif: str = Field(
+        description="The repeating element. E.g. 'isometric dot grid', 'overlapping diamond lattice', 'flowing organic wave curves', 'botanical leaf outline repeats'."
+    )
+    density_scale: str = Field(
+        description="Exact size and spacing. E.g. 'each diamond 16×10px, 8px gutters'. Be specific — vague density produces unusable patterns."
+    )
+    primary_color_hex: str = Field(description="Main motif color hex code from the palette.")
+    secondary_color_hex: str = Field(description="Secondary or accent color hex. Use 'none' if single-color pattern.")
+    background_color_hex: str = Field(description="Background / ground color hex code from the palette.")
+    opacity_notes: str = Field(description="Layering or opacity effects. E.g. '60% opacity on overlapping zones'. Use 'solid' if no transparency.")
+    render_style: str = Field(description="E.g. 'flat vector seamless tile', 'halftone print quality', 'botanical illustration line weight'.")
+    mood: str = Field(description="Emotional quality the pattern should project. E.g. 'premium editorial restraint', 'organic artisan warmth', 'technical grid precision'.")
+    avoid: List[str] = Field(description="Always include: 'text', 'logos', 'photographic elements', 'random noise'.")
+
+
+class BackgroundSpec(BaseModel):
+    """Structured render specification for the atmospheric brand background (16:9)."""
+    scene_type: Literal["environmental_photo", "abstract_field", "macro_texture", "digital_art"] = Field(
+        description=(
+            "'environmental_photo' = real-world landscape or setting, photorealistic. "
+            "'abstract_field' = non-representational color and light composition. "
+            "'macro_texture' = extreme close-up of a material surface. "
+            "'digital_art' = composed digital illustration or gradient artwork."
+        )
+    )
+    description: str = Field(
+        description="Specific scene or subject. E.g. 'misty Vietnamese highland coffee farm at dawn, rows of coffee trees descending a fog-filled valley'. Be cinematic and precise."
+    )
+    primary_color_hex: str = Field(description="Dominant color in the scene — hex from palette.")
+    accent_color_hex: str = Field(description="Secondary / highlight color hex. Use 'none' if monochromatic scene.")
+    lighting: str = Field(description="Lighting quality and direction. E.g. 'soft diffused morning fog light', 'dramatic golden hour rim light from upper left', 'flat overcast'.")
+    composition: str = Field(description="Framing rule. E.g. 'wide 16:9, horizon at lower third, no dominant foreground subject', 'edge-to-edge texture fill, no horizon'.")
+    texture: str = Field(description="Surface or film quality. E.g. 'subtle film grain', 'smooth digital', 'rough handmade paper', 'clean commercial photography'.")
+    mood: str = Field(description="Emotional register. E.g. 'quiet contemplative premium', 'bold energetic kinetic', 'warm intimate heritage'.")
+    avoid: List[str] = Field(description="Always include: 'text', 'logos', 'UI elements', 'watermarks', 'typography'. Add: 'people', 'faces' if not appropriate for brand.")
+
+
 class BrandDirection(BaseModel):
     option_number: int = Field(description="1, 2, 3, or 4")
     option_type: Literal["Market-Aligned", "Designer-Led", "Hybrid", "Wild Card"]
@@ -60,45 +154,26 @@ class BrandDirection(BaseModel):
     logo_concept: str = Field(
         description="2–3 sentences describing the logo form, shape language, and symbol concept"
     )
-    background_prompt: str = Field(
+    background_spec: BackgroundSpec = Field(
         description=(
-            "Gemini image generation prompt for the atmospheric background scene. "
-            "MUST be 2-3 detailed sentences, minimum 40 words describing a specific scene or abstraction. "
-            "NO text, NO logos, NO words of any kind in the image. "
-            "Describe: exact mood, specific colors from the palette (use hex codes), texture, lighting quality "
-            "(e.g. 'soft diffused light', 'dramatic side-lit'), and abstract or environmental composition. "
-            "Should feel like the emotional world of the brand. "
-            "Example: 'A misty mountain landscape at twilight in deep slate #2C3E50 and warm amber #F39C12, "
-            "with soft volumetric light rays cutting through atmospheric haze, subtle grain texture, "
-            "no focal point, horizontal panoramic composition evoking quiet confidence.'"
+            "Structured render spec for the atmospheric background image (16:9). "
+            "Fill every field with direction-specific values — this is translated into an image prompt by the generator. "
+            "The background should feel like the emotional world of the brand."
         )
     )
-    logo_prompt: str = Field(
+    logo_spec: LogoSpec = Field(
         description=(
-            "Gemini image generation prompt for the logo concept mark. "
-            "MUST be 3-4 detailed sentences, minimum 60 words describing exact visual forms. "
-            "A single abstract symbol or geometric mark on a plain white background. "
-            "NO text, NO letterforms, NO words — only the visual mark itself. "
-            "Describe: exact shape geometry (e.g. 'equilateral triangle with rounded corners'), "
-            "line weight (hairline/medium/bold), fill vs outline, visual metaphor, and color. "
-            "Example: 'A single bold circular mark formed by two overlapping arcs in deep navy #1A2B4C, "
-            "each arc 8px stroke weight, creating a subtle lens shape at their intersection in lighter blue #4A90D9. "
-            "The form suggests a lens aperture and precision optics. Clean vector rendering, "
-            "centered with 25% padding on all sides, pure white background, no shadow or gradient.'"
+            "Structured render spec for the logo mark. "
+            "⚠ MONOCHROME RULE: color_hex MUST be exactly ONE hex color — no gradients, no second color. "
+            "⚠ NO TEXT RULE: logo_type must be 'symbol', 'abstract_mark', or 'lettermark' only — NEVER a wordmark or any text. "
+            "Every field must be filled with precise, specific values — vague descriptions produce unusable logos."
         )
     )
-    pattern_prompt: str = Field(
+    pattern_spec: PatternSpec = Field(
         description=(
-            "Gemini image generation prompt for a seamless brand pattern or texture tile. "
-            "MUST be 2-3 detailed sentences, minimum 40 words with specific hex color codes from the palette. "
-            "NO text, NO logos. "
-            "Describe: exact motif type (e.g. 'isometric dot grid', 'overlapping hexagons', "
-            "'flowing organic curves'), spacing/density (e.g. '20px gaps between elements'), "
-            "colors with hex codes, scale, and mood. Should work as a background or surface texture. "
-            "Example: 'A dense repeating pattern of small equilateral triangles in alternating "
-            "deep navy #1A2B4C and warm white #F5F0E8, each triangle 12px per side with 2px gaps, "
-            "creating a subtle optical vibration. Flat vector style, seamless tile, "
-            "professional textile quality suggesting precision and structure.'"
+            "Structured render spec for the seamless brand pattern tile. "
+            "Fill density_scale with exact pixel measurements. "
+            "Colors must use hex codes directly from this direction's palette."
         )
     )
     tagline: str = Field(
@@ -164,25 +239,35 @@ Propose a deliberate balance between market recognition and designer instinct. B
 **Option 4 — Wild Card**
 Surprise. Break from the brief's explicit direction. Use your understanding of the product, audience, and cultural moment to propose an unexpected direction that might be exactly right. No moodboard constraint.
 
-**For image prompts — 3 separate prompts per direction:**
+**For image specs — 3 structured JSON specs per direction:**
 
-background_prompt: Write as if briefing a photographer or digital artist on the mood image.
-- No text, no logos, no UI — pure atmosphere
-- Specify exact colors from the palette, lighting quality (soft/dramatic/diffused), texture or surface
-- Could be: abstract gradient field, macro texture, environmental scene, digital noise pattern
-- Should feel like the emotional world of the brand at a glance
+Each spec has a strict schema. Fill every field with direction-specific, precise values.
+The generator translates these specs into natural language prompts — so every field matters.
 
-logo_prompt: Brief a graphic designer on a single abstract mark.
-- White background, centered mark only — absolutely no text or letterforms
-- Describe the exact geometric or organic form, line weight, whether it's filled/outlined
-- Reference the visual metaphor (e.g. "a simplified wave form suggesting signal flow")
-- Clean, scalable, distinctive
+background_spec: Atmospheric brand world image (16:9 cinematic).
+- scene_type: choose the most fitting type for this direction's mood
+- description: cinematic, specific — name the setting, season, time of day if environmental
+- Use hex codes from THIS direction's palette in primary_color_hex / accent_color_hex
+- lighting: be exact — "soft diffused fog light" not "nice light"
+- mood: 2–4 words that capture the emotional register
 
-pattern_prompt: Brief a surface designer on a repeating tile.
-- No text, no logos — pure pattern
-- Specify the motif (chevron, dot grid, organic cells, flowing lines, etc.)
-- Colors drawn directly from the palette, exact density and scale
-- Mood should match the direction's personality
+logo_spec: The brand mark — symbol only, monochrome, no text.
+⚠ CRITICAL LOGO RULES:
+  1. color_hex = EXACTLY ONE hex code — the logo is ALWAYS monochrome (single color)
+  2. logo_type must be 'symbol', 'abstract_mark', or 'lettermark' — NEVER a wordmark
+  3. form = precise geometry — e.g. "equilateral triangle 72px per side, 6px rounded corners, centered axis at 15° tilt"
+  4. metaphor = what the form evokes (e.g. "coffee bean cross-section revealing a mountain ridge")
+  5. avoid must include: "text", "letterforms", "words", "gradient", "drop shadow", "multiple colors"
+
+Good logo_spec form examples:
+  GOOD: "two concentric arcs, outer radius 48px stroke 5px, inner radius 28px stroke 3px, open at bottom-right, suggesting a coffee bean in cross-section"
+  BAD: "a circular mark evoking the brand values"
+
+pattern_spec: Repeating seamless surface tile.
+- motif: name the element type precisely
+- density_scale: give exact pixel measurements (e.g. "18px hexagons, 6px gaps")
+- Use hex codes from THIS direction's palette
+- mood: matches the direction's personality
 
 **For social copy — 3 short copy fields per direction:**
 
@@ -204,37 +289,45 @@ You MUST use them verbatim in tagline / ad_slogan / announcement_copy for EVERY 
 Do NOT alter, improve, or paraphrase them. Copy them exactly as written.
 Only generate copy freely if no pre-written values are provided.
 
-## IMAGE PROMPT QUALITY GUIDELINES — CRITICAL
+## IMAGE SPEC QUALITY GUIDELINES — CRITICAL
 
-The image prompts you generate are fed directly to an AI image generator. Vague prompts produce generic, unusable images. Specific, detailed prompts produce high-quality brand assets.
+The specs you fill in are translated into image generation prompts. Every field affects quality.
+Vague values → generic output. Specific values → high-quality brand assets.
 
-### LOGO PROMPT — Required elements:
-✓ GOOD: "A single bold mark formed by three concentric circles in deep cobalt #0A3D91, each ring with increasing stroke weight (2px/4px/6px), creating a target-like form suggesting focus and precision. The outermost circle is 80% of the canvas width. Clean vector rendering on pure white background, centered with 20% padding, no shadow."
-✗ BAD: "A circular logo representing technology and innovation"
+### LOGO SPEC — Field-by-field guidance:
 
-✓ GOOD: "An asymmetric leaf form split diagonally — left half in forest green #2D6A4F solid fill, right half as an outline-only stroke in the same green, 3px weight. The leaf tilts 15° clockwise, suggesting dynamic growth. Minimalist botanical style, single element centered on white."
-✗ BAD: "A nature-inspired logo with green colors"
+form (MOST IMPORTANT field):
+  ✓ GOOD: "two concentric arcs, outer radius 48px with 5px stroke, inner radius 28px with 3px stroke, both open at the 7 o'clock position, creating a C-like form suggesting a coffee bean cross-section"
+  ✓ GOOD: "equilateral triangle 72px per side, 8px rounded corners, vertex pointing upward, 15° clockwise tilt"
+  ✗ BAD:  "a circular mark representing the brand"
+  ✗ BAD:  "an organic leaf shape"
 
-### PATTERN PROMPT — Required elements:
-✓ GOOD: "A seamless repeating grid of small diamond shapes in warm terracotta #C9614A on cream #F5EDE0, each diamond 16×10px with 8px gutters, rotated 45°. Every third diamond is hollow (outline only, 1.5px stroke). Creates a refined textile feel reminiscent of high-end stationery. Flat vector, zero noise."
-✗ BAD: "A geometric pattern with warm colors"
+metaphor:
+  ✓ GOOD: "suggests a coffee bean split to reveal a mountain terrain — dual reading of origin and harvest"
+  ✗ BAD:  "represents quality and craftsmanship"
 
-✓ GOOD: "Overlapping circles of varying sizes (24px to 48px diameter) in translucent layers — midnight blue #0D1B2A at 60% opacity and electric cyan #00D4FF at 40% opacity. 6px gaps between circle edges. The overlapping intersections create darker accent zones. Seamless tile, contemporary tech aesthetic."
-✗ BAD: "Abstract circles in brand colors"
+⚠ MONOCHROME — color_hex is a SINGLE hex. The logo is black/one-color on white. Never two colors.
+⚠ NO TEXT — logo_type is 'symbol', 'abstract_mark', or 'lettermark'. Never a wordmark.
 
-### BACKGROUND PROMPT — Required elements:
-✓ GOOD: "A wide cinematic landscape at golden hour: rolling desert dunes in warm ochre #C8972A fading to deep rust #8B2500 at the horizon, with a single shaft of amber light cutting diagonally across the frame. Soft atmospheric haze reduces contrast at distance. Ultra-wide 16:9 format, photorealistic rendering, no focal subjects."
-✗ BAD: "A warm desert background with golden light"
+### PATTERN SPEC — Field-by-field guidance:
 
-✓ GOOD: "Abstract macro texture of brushed aluminum in cool silver #C0C0C0 and anthracite #2A2A2A, lit from the left with hard directional light creating deep parallel grooves and specular highlights. The texture fills the entire frame edge-to-edge. Photographic quality, slight depth of field blur at the far right."
-✗ BAD: "A metallic texture background"
+motif:
+  ✓ GOOD: "botanical coffee leaf outline silhouettes, alternating sizes (24px and 16px leaf length)"
+  ✗ BAD:  "coffee-themed pattern"
 
-### Universal rules for ALL prompts:
-1. Include exact hex color codes from the palette
-2. Specify exact sizes, weights, proportions where applicable
-3. Name the visual style explicitly (vector, photorealistic, digital painting, etc.)
-4. Say "absolutely no text, no words, no letters, no typography anywhere"
-5. Minimum word counts: logo_prompt ≥60 words, pattern_prompt ≥40 words, background_prompt ≥40 words
+density_scale:
+  ✓ GOOD: "each leaf 24px long, 10px wide, 12px vertical gap, 8px horizontal gap, alternating row offset by 50%"
+  ✗ BAD:  "medium density"
+
+### BACKGROUND SPEC — Field-by-field guidance:
+
+description:
+  ✓ GOOD: "misty Vietnamese highland coffee farm at dawn — rows of coffee trees descend a fog-filled valley, terracotta soil visible between rows, soft morning light catching dew on leaves"
+  ✗ BAD:  "a coffee farm scene"
+
+lighting:
+  ✓ GOOD: "soft diffused morning fog light, low contrast, slight warm golden tint at the horizon edge"
+  ✗ BAD:  "natural lighting"
 
 ### COPY QUALITY GUIDELINES:
 tagline — must feel like it belongs on a brand website hero section
@@ -309,33 +402,46 @@ def generate_directions(
         contents = user_message
 
     # Stream response — show dots for progress, accumulate full JSON
-    full_text = ""
-    char_count = 0
-
-    for chunk in client.models.generate_content_stream(
-        model="gemini-2.5-flash",
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=BrandDirectionsOutput,
-        ),
-    ):
-        if chunk.text:
-            full_text += chunk.text
-            char_count += len(chunk.text)
-            # Print a dot every ~200 chars so the user sees progress
-            if char_count % 200 < len(chunk.text):
-                sys.stdout.write(".")
-                sys.stdout.flush()
-
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-
-    if not full_text:
-        raise ValueError("Gemini returned no content")
-
-    return BrandDirectionsOutput.model_validate_json(full_text)
+    max_retries = 3
+    for attempt in range(max_retries):
+        full_text = ""
+        char_count = 0
+        try:
+            for chunk in client.models.generate_content_stream(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=BrandDirectionsOutput,
+                ),
+            ):
+                if chunk.text:
+                    full_text += chunk.text
+                    char_count += len(chunk.text)
+                    # Print a dot every ~200 chars so the user sees progress
+                    if char_count % 200 < len(chunk.text):
+                        sys.stdout.write(".")
+                        sys.stdout.flush()
+        
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        
+            if not full_text:
+                raise ValueError("Gemini returned no content")
+        
+            return BrandDirectionsOutput.model_validate_json(full_text)
+            
+        except Exception as e:
+            sys.stdout.write("\n")
+            err_str = str(e).lower()
+            if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str or "quota" in err_str:
+                if attempt < max_retries - 1:
+                    console.print(f"  [yellow]⚠ Gemini API extremely busy (503). Retrying in 5 seconds... ({attempt + 1}/{max_retries})[/yellow]")
+                    import time
+                    time.sleep(5)
+                    continue
+            raise e
 
 
 # ── Display helpers ───────────────────────────────────────────────────────────

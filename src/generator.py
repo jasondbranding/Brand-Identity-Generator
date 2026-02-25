@@ -192,6 +192,145 @@ Example output: ["saas", "tech", "startup", "minimal", "geometric", "confident",
     return list(user_keywords or [])
 
 
+# ── Spec → natural language prompt translators ────────────────────────────────
+# Order follows image-model best practice:
+#   1. Subject + form  →  2. Composition  →  3. Color  →  4. Style  →  5. Render  →  6. Avoid
+
+def _logo_spec_to_prompt(spec) -> str:
+    """Translate a LogoSpec (Pydantic model or dict) to a natural language image prompt.
+
+    Logo generation always uses exactly ONE color (monochrome rule).
+    The resulting prompt is passed directly to the image model.
+    """
+    d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    if not d:
+        return str(spec)
+
+    logo_type    = d.get("logo_type", "abstract_mark").replace("_", " ")
+    form         = d.get("form", "")
+    composition  = d.get("composition", "centered, 20% padding all sides, pure white background")
+    color_hex    = d.get("color_hex", "#1A1A1A")
+    color_name   = d.get("color_name", "")
+    fill_style   = d.get("fill_style", "solid_fill")
+    stroke_wt    = d.get("stroke_weight", "N/A")
+    render_style = d.get("render_style", "clean flat vector")
+    metaphor     = d.get("metaphor", "")
+    avoid        = d.get("avoid", ["text", "letterforms", "gradient", "drop shadow", "multiple colors"])
+
+    color_label = f"{color_name} {color_hex}".strip()
+
+    fill_desc = {
+        "solid_fill":              f"solid flat fill in {color_label}",
+        "outline_only":            f"outline only in {color_label}, {stroke_wt} stroke weight, transparent interior",
+        "fill_with_outline_detail": f"solid fill in {color_label} with fine {stroke_wt} outline detail elements",
+    }.get(fill_style, f"filled in {color_label}")
+
+    metaphor_clause = f" The form evokes {metaphor}." if metaphor and metaphor.lower() not in ("", "abstract", "n/a") else ""
+    avoid_str = ", ".join(avoid)
+
+    return (
+        # 1. Subject + form
+        f"A single {logo_type} logo mark: {form}. "
+        # 2. Composition
+        f"Composition: {composition}, pure white (#FFFFFF) background. "
+        # 3. Color — monochrome
+        f"Color: {fill_desc}. Strictly monochrome — one color only, no gradients, no tints, no second color. "
+        # 4. Style + metaphor
+        f"Visual style: {render_style}.{metaphor_clause} "
+        # 5. Render quality
+        "Crisp vector-like edges, high contrast, scalable from 16px favicon to billboard. "
+        # 6. Avoids
+        f"Absolutely no: {avoid_str}."
+    )
+
+
+def _pattern_spec_to_prompt(spec) -> str:
+    """Translate a PatternSpec to a natural language image prompt."""
+    d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    if not d:
+        return str(spec)
+
+    motif        = d.get("motif", "geometric repeating pattern")
+    density      = d.get("density_scale", "")
+    primary_hex  = d.get("primary_color_hex", "#000000")
+    secondary_hex = d.get("secondary_color_hex", "none")
+    bg_hex       = d.get("background_color_hex", "#FFFFFF")
+    opacity      = d.get("opacity_notes", "solid")
+    render_style = d.get("render_style", "flat vector, seamless tile")
+    mood         = d.get("mood", "professional")
+    avoid        = d.get("avoid", ["text", "logos"])
+
+    color_desc = f"primary motif color {primary_hex} on background {bg_hex}"
+    if secondary_hex and secondary_hex.lower() not in ("none", ""):
+        color_desc += f", secondary accent {secondary_hex}"
+    if opacity and opacity.lower() not in ("solid", ""):
+        color_desc += f" ({opacity})"
+
+    density_clause = f" Scale and density: {density}." if density else ""
+    avoid_str = ", ".join(avoid)
+
+    return (
+        # 1. Subject + motif
+        f"A seamless repeating pattern tile featuring {motif}.{density_clause} "
+        # 3. Color
+        f"Colors: {color_desc}. "
+        # 4. Style + mood
+        f"Rendering: {render_style}. Mood: {mood}. "
+        # 5. Technical quality
+        "All 4 edges align perfectly for seamless tiling. Professional surface/textile design quality. "
+        # 6. Avoids
+        f"Absolutely no: {avoid_str}."
+    )
+
+
+def _bg_spec_to_prompt(spec) -> str:
+    """Translate a BackgroundSpec to a natural language image prompt."""
+    d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    if not d:
+        return str(spec)
+
+    scene_type   = d.get("scene_type", "abstract_field")
+    description  = d.get("description", "")
+    primary_hex  = d.get("primary_color_hex", "#000000")
+    accent_hex   = d.get("accent_color_hex", "none")
+    lighting     = d.get("lighting", "")
+    composition  = d.get("composition", "wide horizontal 16:9")
+    texture      = d.get("texture", "")
+    mood         = d.get("mood", "")
+    avoid        = d.get("avoid", ["text", "logos", "UI elements", "watermarks"])
+
+    quality_map = {
+        "environmental_photo": "photorealistic cinematic photograph",
+        "abstract_field":      "high-end abstract digital art",
+        "macro_texture":       "close-up macro texture photograph",
+        "digital_art":         "premium digital illustration",
+    }
+    quality_label = quality_map.get(scene_type, "high-quality image")
+
+    color_desc = f"dominant color {primary_hex}"
+    if accent_hex and accent_hex.lower() not in ("none", ""):
+        color_desc += f", accent {accent_hex}"
+
+    parts = [
+        # 1. Subject + scene
+        f"A {quality_label}: {description}.",
+        # 2. Composition
+        f"Composition: {composition}.",
+        # 3. Color
+        f"Color palette: {color_desc}.",
+        # 4. Lighting + texture + mood
+        (f"Lighting: {lighting}. " if lighting else "") +
+        (f"Texture: {texture}. " if texture and texture.lower() not in ("smooth digital", "") else "") +
+        (f"Mood: {mood}." if mood else ""),
+        # 5. Render quality
+        f"Wide cinematic format filling the entire frame edge-to-edge, {quality_label} rendering quality.",
+        # 6. Avoids
+        f"Absolutely no: {', '.join(avoid)}.",
+    ]
+
+    return " ".join(p for p in parts if p.strip())
+
+
 def _generate_direction_assets(
     direction: BrandDirection,
     output_dir: Path,
@@ -210,15 +349,34 @@ def _generate_direction_assets(
     # ── Resolve effective tags once for this direction ─────────────────────
     effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
 
+    # ── Translate structured JSON specs → natural language prompts ──────────
+    # New schema: direction has logo_spec / pattern_spec / background_spec (Pydantic models)
+    # Legacy fallback: direction has logo_prompt / pattern_prompt / background_prompt (str)
+    def _get_prompt(spec_attr: str, prompt_attr: str, translator) -> str:
+        spec = getattr(direction, spec_attr, None)
+        if spec is not None:
+            try:
+                return translator(spec)
+            except Exception as _te:
+                console.print(f"  [yellow]⚠ spec→prompt failed for {spec_attr} ({_te}), using fallback[/yellow]")
+        return getattr(direction, prompt_attr, "") or ""
+
+    bg_prompt      = _get_prompt("background_spec", "background_prompt", _bg_spec_to_prompt)
+    logo_prompt    = _get_prompt("logo_spec",        "logo_prompt",       _logo_spec_to_prompt)
+    pattern_prompt = _get_prompt("pattern_spec",     "pattern_prompt",    _pattern_spec_to_prompt)
+
+    # Log the translated prompts for debugging
+    console.print(f"  [dim]logo prompt ({len(logo_prompt)} chars): {logo_prompt[:120]}…[/dim]")
+
     background = _generate_image(
-        prompt=direction.background_prompt,
+        prompt=bg_prompt,
         save_path=asset_dir / "background.png",
         label="background",
         size_hint="wide landscape, 16:9 aspect ratio",
     )
 
     logo = _generate_image(
-        prompt=direction.logo_prompt,
+        prompt=logo_prompt,
         save_path=asset_dir / "logo.png",
         label="logo",
         size_hint="square format, centered mark, generous white space around it",
@@ -227,7 +385,7 @@ def _generate_direction_assets(
     )
 
     pattern = _generate_image(
-        prompt=direction.pattern_prompt,
+        prompt=pattern_prompt,
         save_path=asset_dir / "pattern.png",
         label="pattern",
         size_hint="square tile, seamlessly repeatable",
