@@ -4,26 +4,30 @@ pipeline_runner.py — Runs the brand identity pipeline programmatically.
 Designed to be called from the Telegram bot. Runs in a thread pool
 so the bot stays responsive. Reports progress via callbacks.
 
-Usage:
-    runner = PipelineRunner(api_key=os.environ["GEMINI_API_KEY"])
-    result = await runner.run(
-        brief_dir=tmp_dir,
-        mode="full",
-        on_progress=lambda msg: bot.edit_message_text(msg, ...),
-        generate_images=True,
-    )
+Pipeline steps:
+  1. Parse brief
+  2. Market context validation (auto-confirm, no interactive prompt)
+  3. Market research (Gemini Search Grounding)
+  4. Generate brand directions
+  5. Generate images (background / logo / pattern per direction)
+     + palette fetch (Color Hunt → ColorMind)
+     + shade scale generation (tints.dev → HSL fallback)
+  6. Composite mockups (Pillow)
+  7. Generate social posts (3 types × N directions)
+  8. Assemble stylescapes (14-cell grid PNG per direction)
+  9. Collect + return all output paths
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
+
 
 # ── Result model ──────────────────────────────────────────────────────────────
 
@@ -33,34 +37,28 @@ class PipelineResult:
     success: bool
     output_dir: Path
     directions_md: Optional[Path] = None
-    image_files: List[Path] = field(default_factory=list)  # logos, patterns, backgrounds
+    directions_json: Optional[Path] = None
+    stylescape_paths: Dict[int, Path] = field(default_factory=dict)  # option_num → stylescape PNG
+    palette_pngs: List[Path] = field(default_factory=list)           # per-direction palette strips
+    shades_pngs: List[Path] = field(default_factory=list)            # per-direction shade scales
+    image_files: List[Path] = field(default_factory=list)            # all PNGs (logos, bg, patterns)
     error: str = ""
     elapsed_seconds: float = 0.0
-
-    def get_images_by_direction(self) -> dict:
-        """Group image files by direction number."""
-        groups: dict = {}
-        for p in self.image_files:
-            # Filename convention: dir1_logo.png, dir2_pattern.png, etc.
-            parts = p.stem.split("_")
-            dir_key = parts[0] if parts else "misc"
-            groups.setdefault(dir_key, []).append(p)
-        return groups
 
 
 # ── Progress callback type ────────────────────────────────────────────────────
 
-ProgressCallback = Callable[[str], None]  # sync callback, called from thread
+ProgressCallback = Callable[[str], None]   # sync, called from worker thread
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 class PipelineRunner:
-    """Runs the brand identity pipeline programmatically (non-CLI)."""
+    """Runs the full brand identity pipeline programmatically (non-CLI)."""
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
-        os.environ["GEMINI_API_KEY"] = api_key  # ensure downstream modules see it
+        os.environ["GEMINI_API_KEY"] = api_key
 
     async def run(
         self,
@@ -69,10 +67,6 @@ class PipelineRunner:
         on_progress: Optional[ProgressCallback] = None,
         generate_images: bool = True,
     ) -> PipelineResult:
-        """
-        Run the full pipeline asynchronously.
-        Calls on_progress(message) at each step.
-        """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
@@ -83,12 +77,14 @@ class PipelineRunner:
             generate_images,
         )
 
-    def _progress(self, callback: Optional[ProgressCallback], msg: str) -> None:
-        if callback:
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _progress(self, cb: Optional[ProgressCallback], msg: str) -> None:
+        if cb:
             try:
-                callback(msg)
+                cb(msg)
             except Exception:
-                pass  # never let progress callback crash the pipeline
+                pass
 
     def _run_sync(
         self,
@@ -97,7 +93,6 @@ class PipelineRunner:
         on_progress: Optional[ProgressCallback],
         generate_images: bool,
     ) -> PipelineResult:
-        """Synchronous pipeline execution (runs in thread pool)."""
         start = time.time()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path("outputs") / f"bot_{timestamp}"
@@ -105,23 +100,18 @@ class PipelineRunner:
 
         try:
             # ── Step 1: Parse brief ──────────────────────────────────────────
-            self._progress(on_progress, "📋 *Step 1/4* — Parsing brief...")
+            self._progress(on_progress, "📋 *Step 1/6* — Đang đọc brief\\.\\.\\.")
             from src.parser import parse_brief
             brief = parse_brief(str(brief_dir), mode=mode)
 
-            # ── Step 2: Market context (non-interactive: auto-confirm) ────────
-            self._progress(on_progress, "🌍 *Step 2/4* — Analysing market context...")
+            # ── Step 2: Market context (auto-confirm, no interactive prompt) ─
+            self._progress(on_progress, "🌍 *Step 2/6* — Phân tích thị trường\\.\\.\\.")
             market_context_str = ""
             try:
                 from src.validate import BriefValidator
                 validator = BriefValidator(self.api_key)
-                # Extract from brief only (no interactive prompt)
                 ctx = validator._extract_from_brief(brief)
                 if not ctx.is_complete():
-                    self._progress(
-                        on_progress,
-                        "🌍 *Step 2/4* — Market context incomplete, inferring with Gemini..."
-                    )
                     ctx = validator._infer_missing(brief, ctx)
                 ctx.confirmed = True
                 market_context_str = ctx.to_research_prompt()
@@ -130,97 +120,152 @@ class PipelineRunner:
 
             # ── Step 3: Market research ───────────────────────────────────────
             research_context = ""
-            if generate_images:  # skip research in no-images mode to save time
-                self._progress(on_progress, "🔍 *Step 3/4* — Researching competitive landscape...")
+            if generate_images:
+                self._progress(on_progress, "🔍 *Step 3/6* — Nghiên cứu competitive landscape\\.\\.\\.")
                 try:
                     from src.researcher import BrandResearcher
                     researcher = BrandResearcher(self.api_key)
-                    result = researcher.research(
+                    res = researcher.research(
                         brief.brief_text,
                         brief.keywords,
                         market_context=market_context_str or None,
                     )
-                    research_context = result.to_director_context()
+                    research_context = res.to_director_context()
                 except Exception as e:
                     self._progress(on_progress, f"⚠️ Research skipped: {e}")
 
-            # ── Step 4: Generate directions ───────────────────────────────────
-            self._progress(on_progress, "🎨 *Step 4a/4* — Generating brand directions...")
+            # ── Step 4: Generate brand directions ────────────────────────────
+            self._progress(on_progress, "🎨 *Step 4/6* — Tạo brand directions\\.\\.\\.")
             from src.director import generate_directions
             directions_output = generate_directions(brief, research_context=research_context)
 
-            # Save directions markdown
-            directions_md = output_dir / "directions.md"
+            # Save directions markdown + JSON
+            directions_md   = output_dir / "directions.md"
+            directions_json = output_dir / "directions.json"
             _write_directions_md(directions_output, directions_md)
+            _write_directions_json(directions_output, directions_json)
 
             if not generate_images:
                 return PipelineResult(
                     success=True,
                     output_dir=output_dir,
                     directions_md=directions_md,
+                    directions_json=directions_json,
                     elapsed_seconds=time.time() - start,
                 )
 
-            # ── Step 5: Generate images ───────────────────────────────────────
-            dir_count = len(directions_output.directions)
+            # ── Step 5: Generate images + palette + shades ───────────────────
+            n_dirs = len(directions_output.directions)
             self._progress(
                 on_progress,
-                f"🖼 *Step 4b/4* — Generating images for {dir_count} directions\\.\\.\\.\n"
-                f"_(this takes 3–8 minutes — grab a coffee ☕)_"
+                f"🖼 *Step 5/6* — Generating images \\({n_dirs} directions\\)\\.\\.\\.\n"
+                f"_\\(background \\+ logo \\+ pattern \\+ palette \\+ shades — ~3\\-8 min\\)_"
             )
             from src.generator import generate_all_assets
             all_assets = generate_all_assets(
                 directions_output.directions,
                 output_dir=output_dir,
                 brief_keywords=brief.keywords,
-                moodboard_images=brief.moodboard_images or None,
+                brand_name=getattr(brief, "brand_name", ""),
+                brief_tagline=getattr(brief, "tagline", ""),
+                brief_ad_slogan=getattr(brief, "ad_slogan", ""),
+                brief_announcement_copy=getattr(brief, "announcement_copy", ""),
+                brief_text=getattr(brief, "brief_text", ""),
+                moodboard_images=getattr(brief, "moodboard_images", None) or None,
             )
 
-            # Collect all generated image files
-            image_files = sorted(output_dir.glob("**/*.png")) + sorted(output_dir.glob("**/*.jpg"))
-            # Exclude any non-image dirs
-            image_files = [p for p in image_files if p.is_file()]
+            # ── Step 6a: Composite mockups ────────────────────────────────────
+            self._progress(on_progress, "🧩 *Step 6a/6* — Compositing mockups\\.\\.\\.")
+            try:
+                from src.mockup_compositor import composite_all_mockups
+                mockup_results = composite_all_mockups(all_assets)
+                for num, composited in mockup_results.items():
+                    all_assets[num].mockups = composited
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Mockups skipped: {e}")
+
+            # ── Step 6b: Social posts ─────────────────────────────────────────
+            self._progress(on_progress, "📱 *Step 6b/6* — Generating social posts\\.\\.\\.")
+            try:
+                from src.social_compositor import generate_social_posts
+                generate_social_posts(all_assets)
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Social posts skipped: {e}")
+
+            # ── Step 6c: Assemble stylescapes ─────────────────────────────────
+            self._progress(on_progress, "🗂 *Step 6c/6* — Assembling stylescapes\\.\\.\\.")
+            stylescape_paths: Dict[int, Path] = {}
+            try:
+                from src.compositor import build_all_stylescapes
+                stylescape_paths = build_all_stylescapes(all_assets, output_dir=output_dir)
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Stylescapes skipped: {e}")
+
+            # ── Collect special output files ──────────────────────────────────
+            palette_pngs: List[Path] = [
+                a.palette_png for a in all_assets.values()
+                if getattr(a, "palette_png", None) and a.palette_png.exists()
+            ]
+            shades_pngs: List[Path] = [
+                a.shades_png for a in all_assets.values()
+                if getattr(a, "shades_png", None) and a.shades_png.exists()
+            ]
+
+            # All generated PNG/JPG files
+            image_files = sorted(
+                p for p in output_dir.glob("**/*.png")
+                if p.is_file() and p.stat().st_size > 500
+            )
 
             return PipelineResult(
                 success=True,
                 output_dir=output_dir,
                 directions_md=directions_md,
+                directions_json=directions_json,
+                stylescape_paths=stylescape_paths,
+                palette_pngs=palette_pngs,
+                shades_pngs=shades_pngs,
                 image_files=image_files,
                 elapsed_seconds=time.time() - start,
             )
 
         except Exception as e:
             import traceback
-            tb = traceback.format_exc()
             return PipelineResult(
                 success=False,
                 output_dir=output_dir,
-                error=f"{e}\n\n{tb}",
+                error=f"{e}\n\n{traceback.format_exc()}",
                 elapsed_seconds=time.time() - start,
             )
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Markdown/JSON helpers ─────────────────────────────────────────────────────
 
 def _write_directions_md(directions_output, path: Path) -> None:
-    """Write directions to a markdown file."""
-    lines = ["# Brand Identity Directions\n"]
+    """Write brand directions to a human-readable markdown file."""
+    lines = [
+        "# Brand Identity Directions\n",
+        f"_Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}_\n",
+        "---\n",
+    ]
     for d in directions_output.directions:
-        lines.append(f"## {d.option_type}\n")
-        lines.append(f"**Concept:** {d.concept}\n")
-        lines.append(f"**Strategy:** {d.strategy}\n")
-        if d.color_palette:
-            palette = " | ".join(
-                f"{c.get('name', '')} {c.get('hex', '')}" for c in d.color_palette
-            )
-            lines.append(f"**Colors:** {palette}\n")
-        if d.typography:
-            lines.append(f"**Typography:** {d.typography}\n")
-        if d.graphic_style:
-            lines.append(f"**Style:** {d.graphic_style}\n")
-        if d.tagline:
-            lines.append(f"**Tagline:** _{d.tagline}_\n")
-        if d.ad_slogan:
-            lines.append(f"**Slogan:** _{d.ad_slogan}_\n")
-        lines.append("---\n")
+        palette = " | ".join(
+            f"{c.name} `{c.hex}`" for c in getattr(d, "colors", [])
+        )
+        typo = f"{d.typography_primary} / {d.typography_secondary}"
+        lines += [
+            f"## Option {d.option_number} — {d.direction_name}",
+            f"**Type:** {d.option_type}  ",
+            f"**Rationale:** {d.rationale}  ",
+            f"**Colors:** {palette}  ",
+            f"**Typography:** {typo}  ",
+            f"**Style:** {d.graphic_style}  ",
+            f"**Logo:** {d.logo_concept}  ",
+            "---\n",
+        ]
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_directions_json(directions_output, path: Path) -> None:
+    """Serialize directions_output to JSON for downstream use (PDF, etc.)."""
+    path.write_text(directions_output.model_dump_json(indent=2), encoding="utf-8")

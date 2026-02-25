@@ -820,42 +820,100 @@ async def _run_pipeline_and_respond(
     except Exception as e:
         logger.warning(f"PDF generation failed: {e}")
 
-    # ── Send images ───────────────────────────────────────────────────────────
-    if result.image_files:
+    # ── Send stylescapes first (highest value output) ─────────────────────────
+    if result.stylescape_paths:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"🖼 *Visual assets* \\({len(result.image_files)} files\\)\\:",
+            text=f"🗂 *Stylescapes* \\({len(result.stylescape_paths)} directions\\)\\:",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
+        for opt_num, ss_path in sorted(result.stylescape_paths.items()):
+            if ss_path.exists():
+                try:
+                    await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=open(ss_path, "rb"),
+                        filename=ss_path.name,
+                        caption=f"Option {opt_num} stylescape",
+                    )
+                except Exception:
+                    pass
 
-        # Group by direction and send in batches
-        images_by_dir = result.get_images_by_direction()
-        for dir_key, imgs in images_by_dir.items():
-            # Send as media group (max 10 per group)
-            for chunk_start in range(0, len(imgs), 9):
-                chunk = imgs[chunk_start:chunk_start + 9]
-                media = []
-                from telegram import InputMediaPhoto
-                for img in chunk:
-                    try:
-                        with open(img, "rb") as f:
-                            media.append(InputMediaPhoto(media=f.read()))
-                    except Exception:
-                        pass
-                if media:
-                    try:
-                        await context.bot.send_media_group(chat_id=chat_id, media=media)
-                    except Exception:
-                        # Fallback: send individually
-                        for img in chunk:
-                            try:
-                                await context.bot.send_document(
-                                    chat_id=chat_id,
-                                    document=open(img, "rb"),
-                                    filename=img.name,
-                                )
-                            except Exception:
-                                pass
+    # ── Send palette strips ────────────────────────────────────────────────────
+    if result.palette_pngs:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🎨 *Color Palettes*\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        for p in result.palette_pngs:
+            try:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=open(p, "rb"),
+                    filename=p.name,
+                )
+            except Exception:
+                pass
+
+    # ── Send shade scales ──────────────────────────────────────────────────────
+    if result.shades_pngs:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🌈 *Shade Scales \\(50→950\\)*\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        for p in result.shades_pngs:
+            try:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=open(p, "rb"),
+                    filename=p.name,
+                )
+            except Exception:
+                pass
+
+    # ── Send remaining image files (logos, backgrounds, patterns) ─────────────
+    # Exclude already-sent files to avoid duplication
+    sent_paths = (
+        set(str(p) for p in result.stylescape_paths.values())
+        | set(str(p) for p in result.palette_pngs)
+        | set(str(p) for p in result.shades_pngs)
+    )
+    raw_imgs = [
+        p for p in result.image_files
+        if str(p) not in sent_paths
+        and p.name not in {"background.png"}     # skip large bg images to save bandwidth
+    ]
+    if raw_imgs:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🖼 *Logos, Patterns \\& Assets* \\({len(raw_imgs)} files\\)\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        from telegram import InputMediaDocument
+        for chunk_start in range(0, len(raw_imgs), 9):
+            chunk = raw_imgs[chunk_start:chunk_start + 9]
+            media = []
+            for img in chunk:
+                try:
+                    with open(img, "rb") as f:
+                        media.append(InputMediaDocument(media=f.read(), filename=img.name))
+                except Exception:
+                    pass
+            if media:
+                try:
+                    await context.bot.send_media_group(chat_id=chat_id, media=media)
+                except Exception:
+                    for img in chunk:
+                        try:
+                            await context.bot.send_document(
+                                chat_id=chat_id,
+                                document=open(img, "rb"),
+                                filename=img.name,
+                            )
+                        except Exception:
+                            pass
 
     await context.bot.send_message(
         chat_id=chat_id,
