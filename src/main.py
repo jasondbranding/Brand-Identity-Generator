@@ -27,6 +27,7 @@ from rich.prompt import Prompt
 from rich.rule import Rule
 
 from .parser import parse_brief
+from .validate import BriefValidator
 from .director import BrandDirection, BrandDirectionsOutput, generate_directions, display_directions
 from .generator import generate_all_assets
 from .mockup_compositor import composite_all_mockups
@@ -408,15 +409,30 @@ def main() -> None:
     img_note = f", {len(brief.moodboard_images)} moodboard image(s)" if brief.moodboard_images else ""
     console.print(f"  [green]✓[/green] Loaded brief ({args.mode} mode, {len(brief.keywords)} keywords{img_note})")
 
-    # ── Step 1b: Market research (optional, non-blocking) ────────────────────
-    research_context = ""
+    # ── Step 1b: Market context validation ───────────────────────────────────
+    market_context_str = ""
     api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key and args.mode == "full":
+        try:
+            validator = BriefValidator(api_key)
+            market_ctx = validator.validate_and_confirm(brief)
+            if market_ctx.confirmed:
+                market_context_str = market_ctx.to_research_prompt()
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Validation skipped: {e}[/yellow]")
+
+    # ── Step 1c: Market research (optional, non-blocking) ────────────────────
+    research_context = ""
     if api_key and not args.no_images:
         try:
             from .researcher import BrandResearcher
-            console.print("\n[bold cyan]Step 1b — Market Research (Gemini + Search)[/bold cyan]")
+            console.print("[bold cyan]Step 1d — Market Research (Gemini + Search)[/bold cyan]")
             researcher = BrandResearcher(api_key)
-            result = researcher.research(brief.brief_text, brief.keywords)
+            result = researcher.research(
+                brief.brief_text,
+                brief.keywords,
+                market_context=market_context_str or None,
+            )
             research_context = result.to_director_context()
             if result.reference_queries:
                 console.print(

@@ -2,8 +2,9 @@
 researcher.py — Brand market researcher using Gemini Search Grounding.
 
 Provides:
-  BrandResearcher.research(brief_text, keywords) → ResearchResult
+  BrandResearcher.research(brief_text, keywords, market_context) → ResearchResult
     - Uses Google Search Grounding to analyze competitors and trends
+    - If market_context provided, uses confirmed geography + competitors as ground truth
     - Generates reference image search queries
 
   BrandResearcher.match_references(keywords, index_dir) → list
@@ -17,7 +18,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from google import genai
 from google.genai import types
@@ -54,18 +55,25 @@ class ResearchResult:
 # ── Researcher ────────────────────────────────────────────────────────────────
 
 RESEARCH_PROMPT_TEMPLATE = """\
-You are a senior brand strategist. Analyze this brand brief and provide market research context.
+You are a senior brand strategist with access to Google Search. \
+Analyze this brand brief and provide market research context.
 
 ## Brand Brief:
 {brief_text}
 
 ## Keywords: {keywords}
 
+{confirmed_context}
+
 Please research and provide:
-1. **Competitive Landscape**: What are the key visual conventions in this market? Who are the main players and how do they look?
+1. **Competitive Landscape**: Search for the actual visual identities of the named competitors. \
+What colour palettes, typography, logo styles, and overall tones do they use? \
+Be specific — name real design choices, not generalities.
 2. **Design Trends**: What are the current design trends in this industry/category?
-3. **Differentiation Opportunities**: Where is there visual white space in the market?
-4. **Reference Searches**: Suggest 5 specific search queries for finding visual inspiration images (for logos, patterns, backgrounds separately).
+3. **Differentiation Opportunities**: Given the competitors' visual conventions, \
+where is there genuine visual white space for this brand?
+4. **Reference Searches**: Suggest 5 specific search queries for finding visual inspiration \
+images (for logos, patterns, backgrounds separately).
 
 Format your response clearly with headers. Be specific and actionable.
 """
@@ -90,13 +98,22 @@ class BrandResearcher:
     def __init__(self, api_key: str) -> None:
         self.client = genai.Client(api_key=api_key)
 
-    def research(self, brief_text: str, keywords: list) -> ResearchResult:
+    def research(
+        self,
+        brief_text: str,
+        keywords: list,
+        market_context: Optional[str] = None,
+    ) -> ResearchResult:
         """
         Perform market research using Google Search Grounding + generate reference queries.
 
         Args:
             brief_text: The raw brief text
             keywords: List of brand keywords
+            market_context: Optional confirmed context string from BriefValidator
+                            (geography, direct competitors, aspirational/avoid brands).
+                            When provided, Gemini uses this as ground truth and searches
+                            for each named competitor's actual visual identity.
 
         Returns:
             ResearchResult with market context and search queries
@@ -104,12 +121,23 @@ class BrandResearcher:
         result = ResearchResult()
         kw_str = ", ".join(keywords[:10]) if keywords else "brand identity"
 
+        # Format confirmed context block
+        confirmed_block = ""
+        if market_context:
+            confirmed_block = (
+                "## CONFIRMED CLIENT CONTEXT (treat as ground truth — do NOT second-guess)\n"
+                + market_context
+                + "\n\nFor each named Direct Competitor, search their brand explicitly "
+                + "and report real visual findings."
+            )
+
         # ── Step 1: Google Search Grounding for market context ─────────────────
         try:
             console.print("  [dim]Researching market context (Gemini + Search)...[/dim]")
             prompt = RESEARCH_PROMPT_TEMPLATE.format(
                 brief_text=brief_text[:2000],
                 keywords=kw_str,
+                confirmed_context=confirmed_block,
             )
 
             search_tool = types.Tool(google_search=types.GoogleSearch())

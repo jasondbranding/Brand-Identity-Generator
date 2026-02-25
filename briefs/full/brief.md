@@ -15,8 +15,13 @@ Confident, calm, intelligent. Not corporate — human. Like a sharp ops person w
 ## Core Promise
 "You'll always know before your customers do."
 
+## Geography
+Global SaaS, primary markets: North America and Europe. English-speaking B2B mid-market.
+
 ## Competitors
-FedEx Logistics, Project44, Flexport — all heavy, enterprise-feeling, dashboard-overloaded.
+Direct: project44, Flexport, FourKites, Turvo
+Aspirational: Linear, Stripe, Vercel, Notion
+Avoid: FedEx, Oracle, SAP — heavy, enterprise, dashboard-overloaded aesthetic
 
 ## What makes NuRange different
 Radical simplicity. One screen. AI-powered, not AI-buzzworded. Feels like Notion met Stripe and decided to solve logistics.
