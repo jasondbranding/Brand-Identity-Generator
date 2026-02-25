@@ -131,60 +131,68 @@ MODELS = [
 SOCIAL_SPECS = {
     "collab_post": {
         "label": "Collab Post",
-        "description": "Brand collaboration announcement — our brand × partner brand",
+        "description": "Brand collaboration announcement — our brand × partner brand, equal split",
         "layout": {
             "type": "split_horizontal",
-            "left_zone": "our brand — logo centered on brand-colored background (left half)",
-            "center_zone": "thin vertical separator line + '×' symbol in neutral color",
-            "right_zone": "partner brand placeholder — minimal geometric mark on neutral background (right half)",
+            "left_zone": "our brand — logo centered on brand primary-color background (left 50%)",
+            "center_zone": "thin 2px vertical separator line + '×' symbol centered vertically in neutral/white",
+            "right_zone": "partner brand — minimal geometric placeholder logo centered on neutral light background (right 50%)",
         },
         "text_overlay": None,
         "constraints": [
             "strict 16:9 ratio, 1920×1080px",
-            "clean split layout, both halves equal width",
-            "our brand logo stays exactly as provided — do not alter it",
-            "right side: generate a minimal geometric placeholder logo for the partner brand",
-            "no additional text, no copy — purely visual",
-            "high production quality, suitable for social media",
+            "exact equal split — left and right halves same width",
+            "our brand logo: use the provided logo asset, centered, do not alter or distort",
+            "partner logo: generate a clean minimal geometric mark as placeholder",
+            "× symbol centered between the two halves, high contrast, readable",
+            "no copy text anywhere — purely visual",
+            "professional social media quality",
         ],
     },
     "announcement_post": {
         "label": "Announcement Post",
-        "description": "Brand announcement — small logo top + announcement copy center",
+        "description": "Feature/update announcement — headline + subtext + logo, editorial layout",
         "layout": {
-            "type": "centered_text",
-            "top_zone": "brand logo, small, centered horizontally, ~12% of height from top",
-            "center_zone": "announcement copy text, large legible font, centered",
-            "background": "use brand primary color as background, or background asset as subtle texture",
+            "type": "feature_announcement",
+            "background": "brand primary color as solid background, or dark background with subtle brand texture",
+            "top_right": "brand logo — small, top-right corner, ~60px tall max",
+            "label_zone": "small label text top-left: 'New in [brand name]' or 'Introducing' — small caps, accent color",
+            "headline_zone": "feature headline — LARGE, left-aligned, 60-70% of canvas width, bold weight, high contrast",
+            "subtext_zone": "1-line subtext below headline — smaller font, secondary/muted tone, max 8 words",
         },
-        "text_overlay": "announcement_copy",   # field from BrandDirection
+        "text_overlay": "announcement_copy",
         "constraints": [
             "strict 16:9 ratio, 1920×1080px",
-            "logo must be small (max 80px tall) centered at top",
-            "announcement text is the hero — large, centered, high contrast against background",
-            "use brand typography style (modern sans-serif or serif per direction)",
-            "no other decorative elements — clean and minimal",
-            "text must be clearly readable, strong contrast ratio",
+            "brand logo: top-right corner, small, do not alter",
+            "headline is the hero — at least 3× larger than subtext",
+            "label ('New in X') is visually distinct — small caps, accent color, above headline",
+            "subtext below headline — 1 line only, restrained",
+            "left-aligned layout feels editorial and modern",
+            "strong contrast: text clearly readable against background",
+            "no other decorative elements",
         ],
     },
     "ads_post": {
         "label": "Ads Post",
-        "description": "Brand advertisement — large slogan hero + small logo corner",
+        "description": "Split ad — brand visual (pattern/background) left, ad slogan + logo right",
         "layout": {
-            "type": "slogan_hero",
-            "main_zone": "large bold slogan text, dominant, center or center-left",
-            "logo_zone": "brand logo small, bottom-right corner, ~5% of canvas size",
-            "background": "bold brand background — use brand color palette, pattern, or abstract shape",
+            "type": "split_visual_copy",
+            "left_zone": "brand visual — use the provided pattern/background asset, fills left 55% of canvas",
+            "right_zone": "copy panel — solid brand color (primary or dark), fills right 45% of canvas",
+            "right_top": "vertical whitespace",
+            "right_center": "ad slogan — LARGE, bold, left-aligned within right panel, 2-3 lines max",
+            "right_bottom": "brand logo — small, bottom-left of right panel",
         },
-        "text_overlay": "ad_slogan",           # field from BrandDirection
+        "text_overlay": "ad_slogan",
         "constraints": [
             "strict 16:9 ratio, 1920×1080px",
-            "slogan text is dominant — fills 50-70% of the canvas visually",
-            "logo is intentionally small — brand whisper, not shout",
-            "bold graphic background using brand primary + secondary colors",
-            "can use pattern or geometric shapes from brand direction",
-            "high contrast, punchy, ad-campaign quality",
-            "no other copy or decorative text",
+            "left 55%: filled with the provided brand pattern or background asset — do not add text here",
+            "right 45%: solid color panel (brand primary or complementary dark tone)",
+            "slogan: bold, large, white or high-contrast text — dominant element on right panel",
+            "logo: bottom of right panel, small, do not alter",
+            "clean hard vertical edge between visual and copy panel",
+            "no additional text or decorative elements",
+            "ad-campaign quality — punchy and modern",
         ],
     },
 }
@@ -201,9 +209,21 @@ def build_social_prompt(
     accent_hex: str,
     direction_name: str,
     graphic_style: str,
+    subtext: str = "",
 ) -> str:
     """Build a JSON-structured IMAGE_GEN_V1 prompt for a social post."""
     spec = SOCIAL_SPECS[post_type]
+
+    copy_block: dict = {}
+    if post_type == "announcement_post":
+        copy_block = {
+            "label": f"New in {brand_name}",
+            "headline": copy_text or "",
+            "subtext": subtext or "",
+        }
+    elif post_type == "ads_post":
+        copy_block = {"slogan": copy_text or ""}
+    # collab_post: no copy
 
     prompt_dict = {
         "IMAGE_GEN_V1": {
@@ -221,7 +241,7 @@ def build_social_prompt(
                 "graphic_style": graphic_style,
             },
             "layout": spec["layout"],
-            "copy": copy_text if copy_text else None,
+            "copy": copy_block if copy_block else None,
             "constraints": spec["constraints"],
             "output": {
                 "resolution": "1920x1080",
@@ -246,8 +266,10 @@ def _generate_one_post(
     graphic_style: str,
     logo_path: Optional[Path],
     save_path: Path,
+    subtext: str = "",
+    pattern_path: Optional[Path] = None,
 ) -> Optional[Path]:
-    """Call Gemini with logo image + structured prompt to generate a social post."""
+    """Call Gemini with logo/pattern images + structured prompt to generate a social post."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         console.print(f"  [yellow]⚠ GEMINI_API_KEY not set — skipping {post_type}[/yellow]")
@@ -262,30 +284,48 @@ def _generate_one_post(
         accent_hex=accent_hex,
         direction_name=direction_name,
         graphic_style=graphic_style,
+        subtext=subtext,
     )
 
     client = genai.Client(api_key=api_key)
     spec = SOCIAL_SPECS[post_type]
     post_label = spec["label"]
 
-    # Build content parts — logo image (if available) + prompt
+    # Build content parts — inject visual assets + prompt
     parts = []
 
+    # 1. Brand logo (all post types)
     if logo_path and logo_path.exists() and logo_path.stat().st_size > 100:
         try:
             img_bytes = logo_path.read_bytes()
             ext = logo_path.suffix.lower().lstrip(".")
             mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else 'png'}"
             parts.append(types.Part.from_text(
-                text="BRAND LOGO — use this logo asset in the social post layout as specified:"
+                text="BRAND LOGO — place this logo in the layout as specified (do not alter or distort):"
             ))
             parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
         except Exception as e:
             console.print(f"  [yellow]⚠ Could not load logo for {post_type}: {e}[/yellow]")
 
+    # 2. Brand pattern/background — injected for ads_post as the visual side
+    if post_type == "ads_post" and pattern_path and pattern_path.exists() and pattern_path.stat().st_size > 100:
+        try:
+            pat_bytes = pattern_path.read_bytes()
+            ext = pattern_path.suffix.lower().lstrip(".")
+            mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else 'png'}"
+            parts.append(types.Part.from_text(
+                text=(
+                    "BRAND VISUAL ASSET — use this pattern/background as the visual panel "
+                    "on the LEFT side of the split layout (left 55%). Do not add any text to this side:"
+                )
+            ))
+            parts.append(types.Part.from_bytes(data=pat_bytes, mime_type=mime))
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Could not load pattern for ads_post: {e}[/yellow]")
+
     parts.append(types.Part.from_text(text=prompt_str))
     parts.append(types.Part.from_text(
-        text=f"Generate the {post_label} now. Output only the final 16:9 image."
+        text=f"Generate the {post_label} now. Output only the final 16:9 image at 1920×1080px."
     ))
 
     contents = parts if len(parts) > 1 else prompt_str
@@ -494,12 +534,19 @@ def generate_social_posts(assets_map: dict) -> dict:
 
         copy_map = {
             "collab_post":        "",             # no copy for collab — visual only
-            "announcement_post":  _announcement,
-            "ads_post":           _slogan,
+            "announcement_post":  _announcement,  # headline (large)
+            "ads_post":           _slogan,         # slogan on right panel
+        }
+        # Subtext for announcement_post = tagline (1 short line below headline)
+        subtext_map = {
+            "announcement_post": _tagline,
         }
 
         # Logo to use (prefer transparent, fall back to regular logo)
         logo_path = assets.logo_transparent or assets.logo
+
+        # Pattern/background asset for ads_post visual panel
+        pattern_path = assets.pattern or assets.background
 
         post_paths: dict = {}
         for post_type in ["collab_post", "announcement_post", "ads_post"]:
@@ -515,6 +562,8 @@ def generate_social_posts(assets_map: dict) -> dict:
                 graphic_style=direction.graphic_style,
                 logo_path=logo_path,
                 save_path=save_path,
+                subtext=subtext_map.get(post_type, ""),
+                pattern_path=pattern_path if post_type == "ads_post" else None,
             )
             post_paths[post_type] = result
 
