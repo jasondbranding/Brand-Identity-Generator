@@ -21,7 +21,20 @@ FedEx Logistics, Project44, Flexport — all heavy, enterprise-feeling, dashboar
 ## What makes NuRange different
 Radical simplicity. One screen. AI-powered, not AI-buzzworded. Feels like Notion met Stripe and decided to solve logistics.
 
-## Copy (optional — remove section to let AI generate)
+## Moodboard
+Minimal. Data-forward but warm. Think the design language of Linear, Stripe, or Vercel — precise grids,
+restrained typography, lots of white space. One confident accent colour against deep navy or charcoal.
+Logo should feel like a fintech company that decided to do logistics: geometric, abstract, no literal trucks or arrows.
+A wordmark or symbol suggesting signal, flow, or forward momentum. Modern sans-serif — Suisse, Neue Haas Grotesk, or Söhne.
+
+## Keywords
+- Predictive (not reactive)
+- Signal over noise
+- Invisible infrastructure
+- Quiet confidence
+- Precision without complexity
+- Trustworthy at scale
+- Forward momentum
 
 ## Tagline
 You'll always know before your customers do.

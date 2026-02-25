@@ -13,8 +13,10 @@ Each direction includes:
 
 from __future__ import annotations
 
+import base64
 import os
 import sys
+from pathlib import Path
 from typing import List, Literal, Optional
 
 from google import genai
@@ -23,7 +25,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 
-from .parser import BriefData
+from .parser import BriefData, IMAGE_EXTS
 
 console = Console()
 
@@ -282,13 +284,37 @@ def generate_directions(
 
     console.print("\n[bold cyan]→ Gemini is analyzing the brief...[/bold cyan]")
 
+    # ── Build contents: text + optional moodboard images ─────────────────────
+    # If the brief folder contains images, send them as visual context
+    moodboard_images = getattr(brief, "moodboard_images", [])
+    if moodboard_images:
+        parts = [types.Part.from_text(text=user_message)]
+        loaded = 0
+        for img_path in moodboard_images[:10]:   # cap at 10 images
+            try:
+                img_bytes = img_path.read_bytes()
+                ext  = img_path.suffix.lower().lstrip(".")
+                mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
+                parts.append(types.Part.from_text(
+                    text=f"Client moodboard reference #{loaded + 1} — "
+                         "use this to inform the visual direction, especially Option 2 (Designer-Led):"
+                ))
+                parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
+                loaded += 1
+            except Exception:
+                pass
+        contents = parts
+        console.print(f"  [dim]moodboard: {loaded} image(s) attached[/dim]")
+    else:
+        contents = user_message
+
     # Stream response — show dots for progress, accumulate full JSON
     full_text = ""
     char_count = 0
 
     for chunk in client.models.generate_content_stream(
         model="gemini-2.5-flash",
-        contents=user_message,
+        contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             response_mime_type="application/json",

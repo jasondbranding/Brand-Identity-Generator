@@ -59,6 +59,7 @@ def generate_all_assets(
     brief_ad_slogan: str = "",
     brief_announcement_copy: str = "",
     brief_text: str = "",
+    moodboard_images: Optional[list] = None,
 ) -> dict:
     """
     Generate bg + logo + pattern for every direction.
@@ -67,11 +68,13 @@ def generate_all_assets(
         directions:              List of BrandDirection objects
         output_dir:              Directory to save assets
         brief_keywords:          Optional brand keywords for reference image matching
-        brand_name:              Actual brand name from the brief (e.g. "Whales Market")
+        brand_name:              Actual brand name from the brief
         brief_tagline:           Pre-written tagline from brief (overrides AI-generated)
         brief_ad_slogan:         Pre-written ad slogan from brief (overrides AI-generated)
         brief_announcement_copy: Pre-written announcement copy from brief (overrides AI-generated)
         brief_text:              Full raw brief text — used for copy fallback generation
+        moodboard_images:        Client-provided reference images from the brief folder
+                                 Injected into logo/pattern generation as highest-priority refs
 
     Returns:
         Dict mapping option_number → DirectionAssets
@@ -92,6 +95,7 @@ def generate_all_assets(
             brief_ad_slogan=brief_ad_slogan,
             brief_announcement_copy=brief_announcement_copy,
             brief_text=brief_text,
+            moodboard_images=moodboard_images,
         )
         results[direction.option_number] = assets
 
@@ -189,14 +193,13 @@ def _generate_direction_assets(
     brief_ad_slogan: str = "",
     brief_announcement_copy: str = "",
     brief_text: str = "",
+    moodboard_images: Optional[list] = None,
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
     asset_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Resolve effective tags once for this direction ─────────────────────
-    # Combines user-provided keywords + AI-extracted taxonomy tags from brief+direction
-    # Used for both ref image matching AND style guide matching
     effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
 
     background = _generate_image(
@@ -212,6 +215,7 @@ def _generate_direction_assets(
         label="logo",
         size_hint="square format, centered mark, generous white space around it",
         brief_keywords=effective_keywords,
+        moodboard_images=moodboard_images,
     )
 
     pattern = _generate_image(
@@ -220,6 +224,7 @@ def _generate_direction_assets(
         label="pattern",
         size_hint="square tile, seamlessly repeatable",
         brief_keywords=effective_keywords,
+        moodboard_images=moodboard_images,
     )
 
     # Create white / black / transparent logo variants for compositor use
@@ -275,11 +280,17 @@ def _generate_image(
     label: str,
     size_hint: str,
     brief_keywords: Optional[list] = None,
+    moodboard_images: Optional[list] = None,
 ) -> Optional[Path]:
     """
-    Try Imagen 3 first, then Gemini 2.0 Flash as fallback.
-    For logos/patterns: injects relevant style guide from styles/ if available.
-    For logos: if reference images are available, use multi-modal style inspiration.
+    Try Imagen 3 first, then Gemini multimodal as fallback.
+
+    For logos/patterns — injects 3 signal layers (in priority order):
+      1. Client moodboard images  (from brief folder — highest fidelity signal)
+      2. Library reference images (auto-tagged from references/logos/)
+      3. Style guide text         (per-category .md from styles/logos/)
+
+    All three are combined in a single multimodal call for maximum quality signal.
     Returns save_path on success; creates a placeholder on full failure.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -353,60 +364,103 @@ def _generate_image(
     try:
         client = genai.Client(api_key=api_key)
 
-        # For logos and patterns: inject reference images as visual quality anchors
-        # Combined with the style guide text already in full_prompt → uses BOTH sources
+        # ── Build multimodal content: moodboard + library refs + style guide ──
+        # Signal priority:
+        #   1. Client moodboard images  (brief folder)  → highest fidelity
+        #   2. Library reference images (references/*)  → craft / category benchmarks
+        #   3. Style guide text         (styles/*)      → already in full_prompt
         contents: object = full_prompt
         _ref_type_map = {"logo": "logos", "pattern": "patterns"}
-        if label in _ref_type_map and brief_keywords:
-            ref_type_key = _ref_type_map[label]
-            ref_images = _get_reference_images(brief_keywords, ref_type_key)   # up to 15
-            if ref_images:
-                label_noun = "logo" if label == "logo" else "pattern"
-                parts = [types.Part.from_text(text=full_prompt)]
 
-                # Group refs by category so model understands cross-category blend intent
-                # e.g. "From industry_finance_crypto (#1/#2) … From style_minimal_geometric (#3/#4)"
-                _cat_counter: dict = {}   # cat_name → count within that cat
-                loaded = 0
-                for ref_path in ref_images:
+        if label in _ref_type_map:
+            label_noun  = "logo" if label == "logo" else "pattern"
+            parts       = [types.Part.from_text(text=full_prompt)]
+            total_loaded = 0
+
+            # ── Layer 1: client moodboard images ──────────────────────────
+            client_refs = list(moodboard_images or [])
+            for i, img_path in enumerate(client_refs[:8]):   # cap at 8 client images
+                try:
+                    img_bytes = Path(img_path).read_bytes()
+                    ext  = Path(img_path).suffix.lower().lstrip(".")
+                    mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
+                    parts.append(types.Part.from_text(
+                        text=(
+                            f"CLIENT MOODBOARD #{i + 1} — "
+                            "This is a direct reference provided by the client. "
+                            "Study its aesthetic, colour mood, and visual language carefully. "
+                            "Your output should feel like it belongs in the same world."
+                        )
+                    ))
+                    parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
+                    total_loaded += 1
+                except Exception:
+                    pass
+
+            if client_refs:
+                n_client = min(len(client_refs), 8)
+                console.print(f"  [dim]moodboard refs injected: {n_client} client image(s)[/dim]")
+
+            # ── Layer 2: library reference images ─────────────────────────
+            if brief_keywords:
+                ref_type_key = _ref_type_map[label]
+                lib_images   = _get_reference_images(brief_keywords, ref_type_key)
+                _cat_counter: dict = {}
+                lib_loaded   = 0
+
+                for ref_path in lib_images:
                     try:
                         img_bytes = ref_path.read_bytes()
                         ext  = ref_path.suffix.lower().lstrip(".")
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
 
-                        cat_name = ref_path.parent.name
+                        cat_name  = ref_path.parent.name
                         _cat_counter[cat_name] = _cat_counter.get(cat_name, 0) + 1
                         cat_label = cat_name.replace("_", " ").title()
                         cat_idx   = _cat_counter[cat_name]
 
                         parts.append(types.Part.from_text(
                             text=(
-                                f"Reference {label_noun} #{loaded + 1} "
+                                f"LIBRARY REFERENCE {label_noun} #{lib_loaded + 1} "
                                 f"[source: {cat_label}, sample {cat_idx}] — "
-                                "Study its craft, production quality, and aesthetic approach. "
-                                "Do NOT copy — use as inspiration only."
+                                "Study its craft and production quality. "
+                                "Do NOT copy — use as a quality benchmark only."
                             )
                         ))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
-                        loaded += 1
+                        lib_loaded  += 1
+                        total_loaded += 1
                     except Exception:
                         pass
 
-                if loaded > 0:
-                    cats_seen = list(dict.fromkeys(p.parent.name for p in ref_images))
-                    blend_summary = " + ".join(
+            # ── Closing synthesis instruction ─────────────────────────────
+            if total_loaded > 0:
+                n_client_loaded = min(len(client_refs), 8) if client_refs else 0
+                n_lib_loaded    = total_loaded - n_client_loaded
+                summary_parts   = []
+                if n_client_loaded:
+                    summary_parts.append(f"{n_client_loaded} client moodboard image(s)")
+                if n_lib_loaded:
+                    cats_seen = list(dict.fromkeys(
+                        Path(p).parent.name for p in (lib_images if brief_keywords else [])
+                    ))
+                    blend_str = " + ".join(
                         c.replace("_", " ").title() for c in cats_seen[:4]
                     ) + (" + …" if len(cats_seen) > 4 else "")
-                    parts.append(types.Part.from_text(
-                        text=(
-                            f"You have studied {loaded} reference {label_noun}s "
-                            f"drawn from {len(cats_seen)} visual categories: {blend_summary}. "
-                            f"Now generate the new {label_noun} described at the top. "
-                            "Synthesise the craft level and aesthetic sensibility across ALL references. "
-                            "The result must be entirely original — not a copy of any single reference."
-                        )
-                    ))
-                    contents = parts
+                    summary_parts.append(
+                        f"{n_lib_loaded} library reference(s) from: {blend_str}"
+                    )
+                parts.append(types.Part.from_text(
+                    text=(
+                        f"You have studied {total_loaded} visual references: "
+                        + " and ".join(summary_parts) + ". "
+                        f"Now generate the new {label_noun} described at the top. "
+                        "Honour the client moodboard's aesthetic. "
+                        "Match the production quality of the library references. "
+                        "The result must be entirely original."
+                    )
+                ))
+                contents = parts
 
         # Model ladder: Nano Banana → Nano Banana Pro → legacy exp
         _gen_models = [

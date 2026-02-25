@@ -32,6 +32,7 @@ from .generator import generate_all_assets
 from .mockup_compositor import composite_all_mockups
 from .compositor import build_all_stylescapes
 from .social_compositor import generate_social_posts
+from .design_system import build_all_design_systems
 
 load_dotenv()
 
@@ -346,6 +347,7 @@ def refinement_loop(
                     brief_ad_slogan=brief.ad_slogan,
                     brief_announcement_copy=brief.announcement_copy,
                     brief_text=brief.brief_text,
+                    moodboard_images=brief.moodboard_images or None,
                 )
                 console.print(f"  [green]✓ Images in {time.time() - t1:.1f}s[/green]")
 
@@ -403,7 +405,8 @@ def main() -> None:
     # ── Step 1: Parse brief ──────────────────────────────────────────────────
     console.print("\n[bold]Step 1/4 — Parsing brief[/bold]")
     brief = parse_brief(args.brief, mode=args.mode)
-    console.print(f"  [green]✓[/green] Loaded brief ({args.mode} mode, {len(brief.keywords)} keywords)")
+    img_note = f", {len(brief.moodboard_images)} moodboard image(s)" if brief.moodboard_images else ""
+    console.print(f"  [green]✓[/green] Loaded brief ({args.mode} mode, {len(brief.keywords)} keywords{img_note})")
 
     # ── Step 1b: Market research (optional, non-blocking) ────────────────────
     research_context = ""
@@ -450,6 +453,7 @@ def main() -> None:
             brief_ad_slogan=brief.ad_slogan,
             brief_announcement_copy=brief.announcement_copy,
             brief_text=brief.brief_text,
+            moodboard_images=brief.moodboard_images or None,
         )
         console.print(f"\n  [green]✓ {sum(1 for a in all_assets.values() if a.background)} background(s), "
                       f"{sum(1 for a in all_assets.values() if a.logo)} logo(s), "
@@ -480,6 +484,26 @@ def main() -> None:
             f"  [green]✓ {n_social} social post(s) across "
             f"{len(social_results)} direction(s) — {time.time() - t_social:.1f}s[/green]"
         )
+
+        console.print("\n[bold]Step 3d/4 — Building design systems[/bold]")
+        t_ds = time.time()
+        try:
+            design_systems = build_all_design_systems(
+                directions_output.directions,
+                base_output_dir=output_dir / "design_systems",
+                generate_patterns=True,
+            )
+            console.print(
+                f"  [green]✓ {len(design_systems)} design system(s) — "
+                f"{time.time() - t_ds:.1f}s[/green]"
+            )
+            for ds in design_systems:
+                console.print(
+                    f"    Option {ds.option_number}: {ds.direction_name} "
+                    f"({len(ds.color_tokens)} colors, {len(ds.type_scale)} type levels)"
+                )
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Design system generation failed: {e}[/yellow]")
 
         # ── Step 4: Assemble stylescapes ──────────────────────────────────────
         console.print("\n[bold]Step 4/4 — Assembling stylescapes (Pillow)[/bold]")
