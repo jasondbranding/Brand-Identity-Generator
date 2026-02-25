@@ -77,9 +77,10 @@ logger = logging.getLogger(__name__)
     MOODBOARD_NOTES,
     MOODBOARD_IMAGES,
     KEYWORDS,
+    COLOR_PREFERENCES,
     MODE_CHOICE,
     CONFIRM,
-) = range(12)
+) = range(13)
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -192,6 +193,11 @@ _BULK_FIELD_PATTERNS: list[tuple[str, str]] = [
     # keywords
     (r"keywords?", "keywords"),
     (r"t[uừ]\s*kh[oó][aá]", "keywords"),
+    # color preferences
+    (r"colou?r(?:\s*preferences?)?", "color_preferences"),
+    (r"m[àa]u(?:\s*s[ắa]c)?(?:\s*[uưù]u\s*ti[eê]n)?", "color_preferences"),
+    (r"palette", "color_preferences"),
+    (r"m[àa]u\s*ch[uủ]\s*[đd][aạ]o", "color_preferences"),
 ]
 
 # Competitor sub-section patterns
@@ -286,6 +292,9 @@ def _parse_bulk_fields(text: str, brief: "ConversationBrief") -> int:
             kws = re.split(r"[,\n]+", value)
             brief.keywords = [k.strip().lstrip("-• ") for k in kws if k.strip()]
             filled += 1
+        elif field == "color_preferences":
+            brief.color_preferences = value
+            filled += 1
 
     return filled
 
@@ -341,6 +350,8 @@ def _next_unfilled_state(brief: "ConversationBrief") -> int:
         return MOODBOARD_NOTES
     if not brief.keywords:
         return KEYWORDS
+    if not brief.color_preferences:
+        return COLOR_PREFERENCES
     return MODE_CHOICE
 
 
@@ -412,6 +423,15 @@ async def _ask_for_state(
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return KEYWORDS
+    if state == COLOR_PREFERENCES:
+        await update.message.reply_text(
+            "🎨 *Màu sắc ưu tiên?*\n\n"
+            "_\\(optional — gợi ý màu bạn muốn dùng cho brand\\)_\n"
+            "_Ví dụ: \"Xanh navy \\+ vàng gold\", \"Tone earthy: nâu đất, be, rêu\", \"Tối giản đen trắng\"_\n\n"
+            "_/skip để AI tự chọn palette_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return COLOR_PREFERENCES
     # MODE_CHOICE or anything beyond → show mode picker
     await update.message.reply_text(
         "*Chọn chế độ generate:*",
@@ -488,6 +508,11 @@ def _get_reask_map() -> dict:
         KEYWORDS: (
             "keywords",
             "*Keywords thương hiệu?*\n_\\(mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n_Gõ /skip để bỏ qua_",
+            None,
+        ),
+        COLOR_PREFERENCES: (
+            "color_preferences",
+            "🎨 *Màu sắc ưu tiên?*\n_\\(gõ /skip để AI tự chọn\\)_",
             None,
         ),
     }
@@ -1025,9 +1050,8 @@ async def step_moodboard_notes(update: Update, context: ContextTypes.DEFAULT_TYP
 # ── Step 9: Moodboard Images ──────────────────────────────────────────────────
 
 async def step_moodboard_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle a single moodboard photo upload."""
+    """Handle a single moodboard photo upload (compressed photo or image file/document)."""
     brief = get_brief(context)
-    photo: PhotoSize = update.message.photo[-1]  # largest size
 
     # Download to temp dir
     tmp_dir = context.user_data.get(TEMP_DIR_KEY)
@@ -1038,13 +1062,28 @@ async def step_moodboard_image(update: Update, context: ContextTypes.DEFAULT_TYP
         tmp_dir = Path(tmp_dir)
 
     idx = len(brief.moodboard_image_paths) + 1
-    img_path = tmp_dir / f"moodboard_{idx:02d}.jpg"
-    file = await context.bot.get_file(photo.file_id)
-    await file.download_to_drive(str(img_path))
+
+    if update.message.photo:
+        # Regular compressed photo
+        photo: PhotoSize = update.message.photo[-1]  # largest size
+        img_path = tmp_dir / f"moodboard_{idx:02d}.jpg"
+        file = await context.bot.get_file(photo.file_id)
+        await file.download_to_drive(str(img_path))
+    elif update.message.document:
+        # Image sent as a file (uncompressed) — preserve original extension
+        doc: Document = update.message.document
+        ext = Path(doc.file_name or "image.jpg").suffix.lower() or ".jpg"
+        img_path = tmp_dir / f"moodboard_{idx:02d}{ext}"
+        file = await context.bot.get_file(doc.file_id)
+        await file.download_to_drive(str(img_path))
+    else:
+        # Shouldn't happen but guard anyway
+        return MOODBOARD_IMAGES
+
     brief.moodboard_image_paths.append(img_path)
 
     await update.message.reply_text(
-        f"📸 Đã nhận ảnh #{idx}\\! "
+        f"📸 Đã nhận ảnh \\#{idx}\\! "
         f"Gửi tiếp hoặc gõ /done khi xong\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
@@ -1088,12 +1127,52 @@ async def step_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     push_history(context, KEYWORDS)
     text = update.message.text.strip()
 
-    # Keywords step is the last before mode — no bulk jump needed beyond keywords,
-    # but check anyway in case user pastes "Keywords: x, y\nMode: full" etc.
+    # Check for bulk input (keywords + color preferences in same paste)
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     if text.lower() != "/skip" and intent != "skip" and text:
         import re
         kws = re.split(r"[,\n]+", text)
         brief.keywords = [k.strip().lstrip("-• ") for k in kws if k.strip()]
+    await send_typing(update)
+    await update.message.reply_text(
+        "🎨 *Màu sắc ưu tiên?*\n\n"
+        "_\\(optional — gợi ý màu bạn muốn dùng cho brand\\)_\n"
+        "_Ví dụ: \"Xanh navy \\+ vàng gold\", \"Tone earthy: nâu đất, be, rêu\", \"Tối giản đen trắng\"_\n\n"
+        "_/skip để AI tự chọn palette_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return COLOR_PREFERENCES
+
+
+# ── Step 10b: Color Preferences ───────────────────────────────────────────────
+
+async def step_color_preferences(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    intent = detect_intent(update.message.text or "")
+    if intent == "back":
+        return await handle_back(update, context)
+    brief = get_brief(context)
+    push_history(context, COLOR_PREFERENCES)
+    text = update.message.text.strip()
+
+    if text.lower() != "/skip" and intent != "skip" and text:
+        brief.color_preferences = text
     await send_typing(update)
     await update.message.reply_text(
         "*Chọn chế độ generate:*",
@@ -1435,13 +1514,19 @@ def build_app(token: str) -> Application:
                 CommandHandler("skip", step_moodboard_notes),
             ],
             MOODBOARD_IMAGES: [
+                # Accept both compressed photos AND images sent as files
                 MessageHandler(filters.PHOTO, step_moodboard_image),
+                MessageHandler(filters.Document.IMAGE, step_moodboard_image),
                 CommandHandler("done", step_moodboard_done),
                 CommandHandler("skip", step_moodboard_skip),
             ],
             KEYWORDS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_keywords),
                 CommandHandler("skip", step_keywords),
+            ],
+            COLOR_PREFERENCES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, step_color_preferences),
+                CommandHandler("skip", step_color_preferences),
             ],
             MODE_CHOICE: [CallbackQueryHandler(step_mode_callback, pattern="^mode_")],
             CONFIRM:     [CallbackQueryHandler(step_confirm_callback, pattern="^confirm_")],

@@ -33,6 +33,7 @@ class ConversationBrief:
     competitors_avoid: List[str] = field(default_factory=list)
     geography: str = ""
     keywords: List[str] = field(default_factory=list)
+    color_preferences: str = ""  # user-suggested colors / palette direction
     moodboard_notes: str = ""
     moodboard_image_paths: List[Path] = field(default_factory=list)  # downloaded Telegram photos
 
@@ -61,6 +62,8 @@ class ConversationBrief:
             lines.append(f"✨ *Aspirational:* {', '.join(self.competitors_aspirational)}")
         if self.keywords:
             lines.append(f"🔑 *Keywords:* {', '.join(self.keywords[:6])}")
+        if self.color_preferences:
+            lines.append(f"🎨 *Colors:* {self.color_preferences[:80]}{'...' if len(self.color_preferences) > 80 else ''}")
         if self.moodboard_notes:
             lines.append(f"🖼 *Moodboard:* {self.moodboard_notes[:80]}...")
         if self.moodboard_image_paths:
@@ -99,6 +102,9 @@ class ConversationBrief:
             comp_lines.append(f"Avoid: {', '.join(self.competitors_avoid)}")
         if comp_lines:
             sections.append("## Competitors\n" + "\n".join(comp_lines) + "\n")
+
+        if self.color_preferences:
+            sections.append(f"## Color Preferences\n{self.color_preferences}\n")
 
         if self.moodboard_notes:
             sections.append(f"## Moodboard\n{self.moodboard_notes}\n")
