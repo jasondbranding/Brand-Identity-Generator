@@ -132,6 +132,10 @@ SKIP_PHRASES = {
     "để sau", "nope", "n/a", "na", "no", "không điền", "bỏ trống",
     "để trống", "chưa", "chưa biết", "kh", "tạm bỏ", "bỏ qua đi",
     "không quan trọng", "chưa nghĩ ra",
+    # "not yet" / "don't have one" variants (for slogan/tagline question)
+    "chưa có sẵn", "không có sẵn", "chưa có gì", "chưa nghĩ", "chưa có slogan",
+    "chưa có tagline", "chưa có câu", "không có câu", "không có slogan",
+    "chưa", "chưa ạ", "chưa có ạ", "không có ạ", "chưa nghĩ ra ạ",
     # "let AI decide" variants
     "nghĩ hộ", "nghĩ giúp", "bạn nghĩ hộ", "nghĩ hộ được không",
     "nghĩ hộ đi", "để ai nghĩ", "ai tự nghĩ", "để bạn nghĩ",
@@ -392,7 +396,7 @@ def _state_question_text(state: int) -> str:
         PRODUCT:      "*Mô tả ngắn về sản phẩm/dịch vụ?*\n_\\(ví dụ: SaaS platform giúp logistics track shipments bằng AI\\)_",
         AUDIENCE:     "*Target audience là ai?*\n_\\(ví dụ: Ops managers tại mid\\-market e\\-commerce\\)_",
         TONE:         "*Tone/cá tính thương hiệu?*\n_Chọn một trong các hướng dưới đây, hoặc tự mô tả\\:_",
-        CORE_PROMISE: "*Core promise / câu tagline định hướng?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
+        CORE_PROMISE: "*Bạn đã có sẵn slogan hay tagline chưa?*\n_\\(Nếu có thì paste vào — chưa có thì nhắn 'chưa có' là được\\)_",
         GEOGRAPHY:    "*Geography / thị trường mục tiêu?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
         COMPETITORS:  "*Đối thủ cạnh tranh?*\n_\\(Direct/Aspirational/Avoid — hoặc nhắn 'bỏ qua'\\)_",
         MOODBOARD_NOTES: "*Moodboard notes?*\n_\\(optional — nhắn 'bỏ qua' nếu không có\\)_",
@@ -430,8 +434,8 @@ async def _ask_for_state(
         return TONE
     if state == CORE_PROMISE:
         await update.message.reply_text(
-            "*Core promise / câu tagline định hướng?*\n"
-            "_\\(optional — nhắn_ *bỏ qua* _nếu chưa có\\)_",
+            "*Bạn đã có sẵn slogan hay tagline chưa?*\n"
+            "_Nếu có thì paste vào — chưa có thì nhắn_ *chưa có* _là được_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return CORE_PROMISE
@@ -533,7 +537,7 @@ def _get_reask_map() -> dict:
         ),
         CORE_PROMISE: (
             "core_promise",
-            "*Core promise / câu tagline định hướng?*\n_Gõ /skip để bỏ qua_",
+            "*Bạn đã có sẵn slogan hay tagline chưa?*\n_Nếu có thì paste vào — chưa có thì nhắn 'chưa có' là được_",
             None,
         ),
         GEOGRAPHY: (
