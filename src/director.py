@@ -99,6 +99,31 @@ class BrandDirection(BaseModel):
             "professional textile quality suggesting precision and structure.'"
         )
     )
+    tagline: str = Field(
+        default="",
+        description=(
+            "Brand tagline — 5 to 10 words, memorable and on-brand. "
+            "Captures the brand's core promise or personality. "
+            "Example: 'Where every market tells a story.' or 'Built for those who move first.'"
+        )
+    )
+    ad_slogan: str = Field(
+        default="",
+        description=(
+            "Short punchy ad slogan — 3 to 6 words, bold and action-oriented. "
+            "Used as the hero text on ad posts. "
+            "Example: 'Trade smarter. Live bolder.' or 'Fresh finds. Bold moves.'"
+        )
+    )
+    announcement_copy: str = Field(
+        default="",
+        description=(
+            "Announcement post body text — 10 to 18 words, brand voice tone. "
+            "Sounds like an exciting brand announcement on X/Twitter. "
+            "Example: 'Something new is here. Discover the market experience you've been waiting for.' "
+            "or 'We're redefining what it means to build in public. Stay close.'"
+        )
+    )
 
 
 class BrandDirectionsOutput(BaseModel):
@@ -153,6 +178,20 @@ pattern_prompt: Brief a surface designer on a repeating tile.
 - Colors drawn directly from the palette, exact density and scale
 - Mood should match the direction's personality
 
+**For social copy — 3 short copy fields per direction:**
+
+tagline: The brand's core promise in 5–10 words.
+- Memorable, on-brand, platform-agnostic
+- Should work as a standalone sentence or subtitle
+
+ad_slogan: A punchy 3–6 word hero line for ads.
+- Bold, imperative or evocative
+- Will appear large on a 16:9 ad post
+
+announcement_copy: 10–18 words for a brand announcement post on X.
+- Sounds exciting, human, slightly cryptic
+- Written as if the brand is sharing news
+
 ## IMAGE PROMPT QUALITY GUIDELINES — CRITICAL
 
 The image prompts you generate are fed directly to an AI image generator. Vague prompts produce generic, unusable images. Specific, detailed prompts produce high-quality brand assets.
@@ -184,6 +223,19 @@ The image prompts you generate are fed directly to an AI image generator. Vague 
 3. Name the visual style explicitly (vector, photorealistic, digital painting, etc.)
 4. Say "absolutely no text, no words, no letters, no typography anywhere"
 5. Minimum word counts: logo_prompt ≥60 words, pattern_prompt ≥40 words, background_prompt ≥40 words
+
+### COPY QUALITY GUIDELINES:
+tagline — must feel like it belongs on a brand website hero section
+✓ GOOD: "Where every market tells a story." / "Built for those who move first."
+✗ BAD: "A great brand for everyone." / "Quality and innovation."
+
+ad_slogan — punchy, could be a billboard
+✓ GOOD: "Trade smarter. Live bolder." / "Fresh finds. Bold moves."
+✗ BAD: "We are the best choice for you."
+
+announcement_copy — reads like a real tweet, 10–18 words
+✓ GOOD: "Something new is here. The market experience you've been waiting for — now live."
+✗ BAD: "We are excited to announce our new brand identity is ready for everyone to see."
 """
 
 

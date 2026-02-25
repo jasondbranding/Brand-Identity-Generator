@@ -31,6 +31,7 @@ from .director import BrandDirection, BrandDirectionsOutput, generate_directions
 from .generator import generate_all_assets
 from .mockup_compositor import composite_all_mockups
 from .compositor import build_all_stylescapes
+from .social_compositor import generate_social_posts
 
 load_dotenv()
 
@@ -350,6 +351,10 @@ def refinement_loop(
                     all_assets[num].mockups = composited
                 console.print(f"  [green]✓ Mockups in {time.time() - t_mock:.1f}s[/green]")
 
+                t_social = time.time()
+                generate_social_posts(all_assets)
+                console.print(f"  [green]✓ Social posts in {time.time() - t_social:.1f}s[/green]")
+
                 t2 = time.time()
                 stylescape_paths = build_all_stylescapes(all_assets, output_dir=iter_dir)
                 console.print(f"  [green]✓ Stylescapes in {time.time() - t2:.1f}s[/green]")
@@ -453,6 +458,19 @@ def main() -> None:
         console.print(
             f"  [green]✓ {n_mockups} composited mockup(s) across "
             f"{len(mockup_results)} direction(s) — {time.time() - t_mock:.1f}s[/green]"
+        )
+
+        # ── Step 3c: Generate social posts ────────────────────────────────────
+        console.print("\n[bold]Step 3c/4 — Generating social posts (Gemini)[/bold]")
+        t_social = time.time()
+        social_results = generate_social_posts(all_assets)
+        n_social = sum(
+            sum(1 for k, v in posts.items() if k != "board" and v)
+            for posts in social_results.values()
+        )
+        console.print(
+            f"  [green]✓ {n_social} social post(s) across "
+            f"{len(social_results)} direction(s) — {time.time() - t_social:.1f}s[/green]"
         )
 
         # ── Step 4: Assemble stylescapes ──────────────────────────────────────
