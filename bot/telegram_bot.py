@@ -76,11 +76,13 @@ logger = logging.getLogger(__name__)
     COMPETITORS,
     MOODBOARD_NOTES,
     MOODBOARD_IMAGES,
+    LOGO_INSPIRATION,
+    PATTERN_INSPIRATION,
     KEYWORDS,
     COLOR_PREFERENCES,
     MODE_CHOICE,
     CONFIRM,
-) = range(13)
+) = range(15)
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -590,6 +592,52 @@ def escape_md(text: str) -> str:
     return "".join(f"\\{c}" if c in special else c for c in text)
 
 
+# ── Image helpers ─────────────────────────────────────────────────────────────
+
+def _has_any_images(brief: "ConversationBrief") -> bool:
+    """Return True if the user has uploaded any inspiration images."""
+    return bool(
+        brief.moodboard_image_paths
+        or brief.logo_inspiration_paths
+        or brief.pattern_inspiration_paths
+    )
+
+
+async def _download_image(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    prefix: str,
+    idx: int,
+) -> Optional[Path]:
+    """
+    Download a photo or document-image from the current message.
+    Returns the saved Path, or None if no image found.
+    """
+    tmp_dir = context.user_data.get(TEMP_DIR_KEY)
+    if not tmp_dir:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="moodboard_"))
+        context.user_data[TEMP_DIR_KEY] = tmp_dir
+    else:
+        tmp_dir = Path(tmp_dir)
+
+    if update.message.photo:
+        photo: PhotoSize = update.message.photo[-1]
+        img_path = tmp_dir / f"{prefix}_{idx:02d}.jpg"
+        file = await context.bot.get_file(photo.file_id)
+        await file.download_to_drive(str(img_path))
+        return img_path
+
+    if update.message.document:
+        doc: Document = update.message.document
+        ext = Path(doc.file_name or "image.jpg").suffix.lower() or ".jpg"
+        img_path = tmp_dir / f"{prefix}_{idx:02d}{ext}"
+        file = await context.bot.get_file(doc.file_id)
+        await file.download_to_drive(str(img_path))
+        return img_path
+
+    return None
+
+
 # ── /start ────────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1050,53 +1098,127 @@ async def step_moodboard_notes(update: Update, context: ContextTypes.DEFAULT_TYP
 # ── Step 9: Moodboard Images ──────────────────────────────────────────────────
 
 async def step_moodboard_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle a single moodboard photo upload (compressed photo or image file/document)."""
+    """Handle a general moodboard / aesthetic reference image."""
     brief = get_brief(context)
-
-    # Download to temp dir
-    tmp_dir = context.user_data.get(TEMP_DIR_KEY)
-    if not tmp_dir:
-        tmp_dir = Path(tempfile.mkdtemp(prefix="moodboard_"))
-        context.user_data[TEMP_DIR_KEY] = tmp_dir
-    else:
-        tmp_dir = Path(tmp_dir)
-
     idx = len(brief.moodboard_image_paths) + 1
-
-    if update.message.photo:
-        # Regular compressed photo
-        photo: PhotoSize = update.message.photo[-1]  # largest size
-        img_path = tmp_dir / f"moodboard_{idx:02d}.jpg"
-        file = await context.bot.get_file(photo.file_id)
-        await file.download_to_drive(str(img_path))
-    elif update.message.document:
-        # Image sent as a file (uncompressed) — preserve original extension
-        doc: Document = update.message.document
-        ext = Path(doc.file_name or "image.jpg").suffix.lower() or ".jpg"
-        img_path = tmp_dir / f"moodboard_{idx:02d}{ext}"
-        file = await context.bot.get_file(doc.file_id)
-        await file.download_to_drive(str(img_path))
-    else:
-        # Shouldn't happen but guard anyway
+    img_path = await _download_image(update, context, "moodboard", idx)
+    if not img_path:
         return MOODBOARD_IMAGES
-
     brief.moodboard_image_paths.append(img_path)
-
     await update.message.reply_text(
-        f"📸 Đã nhận ảnh \\#{idx}\\! "
-        f"Gửi tiếp hoặc gõ /done khi xong\\.",
+        f"📸 Đã nhận ảnh \\#{idx}\\! Gửi tiếp hoặc gõ /done khi xong\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return MOODBOARD_IMAGES
 
 
 async def step_moodboard_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User signals they're done uploading images."""
+    """User signals done uploading general moodboard images → ask for logo inspirations."""
     brief = get_brief(context)
     img_count = len(brief.moodboard_image_paths)
-    note = f"✅ Nhận {img_count} ảnh\\!" if img_count else "⏭ Bỏ qua ảnh moodboard\\."
+    note = f"✅ Nhận {img_count} ảnh moodboard\\!" if img_count else "⏭ Bỏ qua ảnh moodboard\\."
     await update.message.reply_text(
         f"{note}\n\n"
+        "🔤 *Bạn có ảnh logo nào muốn tham khảo không?*\n"
+        "_\\(logo của brand khác mà bạn thích về phong cách, font, biểu tượng\\.\\.\\.\\)_\n\n"
+        "_Gửi ảnh trực tiếp \\(hoặc dạng file\\) — có thể gửi nhiều_\n"
+        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return LOGO_INSPIRATION
+
+
+async def step_moodboard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User skips general moodboard images → still ask for logo inspirations."""
+    await update.message.reply_text(
+        "⏭ Bỏ qua ảnh moodboard\\.\n\n"
+        "🔤 *Bạn có ảnh logo nào muốn tham khảo không?*\n"
+        "_\\(logo của brand khác mà bạn thích về phong cách, font, biểu tượng\\.\\.\\.\\)_\n\n"
+        "_Gửi ảnh trực tiếp \\(hoặc dạng file\\) — có thể gửi nhiều_\n"
+        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return LOGO_INSPIRATION
+
+
+# ── Step 9b: Logo Inspiration ─────────────────────────────────────────────────
+
+async def step_logo_inspiration_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle a logo inspiration image."""
+    brief = get_brief(context)
+    idx = len(brief.logo_inspiration_paths) + 1
+    img_path = await _download_image(update, context, "logo_ref", idx)
+    if not img_path:
+        return LOGO_INSPIRATION
+    brief.logo_inspiration_paths.append(img_path)
+    await update.message.reply_text(
+        f"🔤 Đã nhận logo ref \\#{idx}\\! Gửi tiếp hoặc /done khi xong\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return LOGO_INSPIRATION
+
+
+async def step_logo_inspiration_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Done with logo inspirations → ask for pattern/banner inspirations."""
+    brief = get_brief(context)
+    n = len(brief.logo_inspiration_paths)
+    note = f"✅ Nhận {n} logo ref\\!" if n else "⏭ Bỏ qua logo refs\\."
+    await update.message.reply_text(
+        f"{note}\n\n"
+        "🌿 *Bạn có ảnh hoa văn, hoạ tiết, hoặc banner mẫu nào không?*\n"
+        "_\\(pattern, texture, social media banner, bao bì sản phẩm\\.\\.\\. bất kỳ thứ gì định hướng visual layout\\)_\n\n"
+        "_Gửi ảnh hoặc file — có thể gửi nhiều_\n"
+        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return PATTERN_INSPIRATION
+
+
+async def step_logo_inspiration_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Skip logo inspirations → ask for pattern/banner."""
+    await update.message.reply_text(
+        "⏭ Bỏ qua logo refs\\.\n\n"
+        "🌿 *Bạn có ảnh hoa văn, hoạ tiết, hoặc banner mẫu nào không?*\n"
+        "_\\(pattern, texture, social banner, bao bì sản phẩm — bất kỳ thứ gì định hướng visual layout\\)_\n\n"
+        "_Gửi ảnh hoặc file — có thể gửi nhiều_\n"
+        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return PATTERN_INSPIRATION
+
+
+# ── Step 9c: Pattern / Banner Inspiration ─────────────────────────────────────
+
+async def step_pattern_inspiration_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle a pattern / banner inspiration image."""
+    brief = get_brief(context)
+    idx = len(brief.pattern_inspiration_paths) + 1
+    img_path = await _download_image(update, context, "pattern_ref", idx)
+    if not img_path:
+        return PATTERN_INSPIRATION
+    brief.pattern_inspiration_paths.append(img_path)
+    await update.message.reply_text(
+        f"🌿 Đã nhận pattern ref \\#{idx}\\! Gửi tiếp hoặc /done khi xong\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return PATTERN_INSPIRATION
+
+
+async def step_pattern_inspiration_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Done with pattern inspirations → continue to KEYWORDS. Auto-set full mode if images."""
+    brief = get_brief(context)
+    n = len(brief.pattern_inspiration_paths)
+    note = f"✅ Nhận {n} pattern ref\\!" if n else "⏭ Bỏ qua pattern refs\\."
+
+    # Auto-switch to full mode if any inspiration images were uploaded
+    auto_full_note = ""
+    if _has_any_images(brief) and brief.mode != "full":
+        brief.mode = "full"
+    if _has_any_images(brief):
+        auto_full_note = "\n\n🎨 _Bạn đã có visual references — tự động chọn *Full mode* để AI phân tích sâu hơn\\._"
+
+    await update.message.reply_text(
+        f"{note}{auto_full_note}\n\n"
         "*Keywords thương hiệu?*\n"
         "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
         "_ví dụ: minimal, trustworthy, precision_\n"
@@ -1106,9 +1228,18 @@ async def step_moodboard_done(update: Update, context: ContextTypes.DEFAULT_TYPE
     return KEYWORDS
 
 
-async def step_moodboard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def step_pattern_inspiration_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Skip pattern inspirations → continue to KEYWORDS."""
+    brief = get_brief(context)
+
+    auto_full_note = ""
+    if _has_any_images(brief) and brief.mode != "full":
+        brief.mode = "full"
+    if _has_any_images(brief):
+        auto_full_note = "\n\n🎨 _Bạn đã có visual references — tự động chọn *Full mode* để AI phân tích sâu hơn\\._"
+
     await update.message.reply_text(
-        "⏭ Bỏ qua ảnh moodboard\\.\n\n"
+        f"⏭ Bỏ qua pattern refs\\.{auto_full_note}\n\n"
         "*Keywords thương hiệu?*\n"
         "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
         "_/skip để bỏ qua_",
@@ -1189,6 +1320,14 @@ async def step_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     brief = get_brief(context)
     brief.mode = "quick" if query.data == "mode_quick" else "full"
+
+    # If user chose quick but has images, warn them (images are best used with full)
+    if brief.mode == "quick" and _has_any_images(brief):
+        await query.message.reply_text(
+            "⚠️ _Bạn đã upload visual references nhưng chọn Quick mode\\._\n"
+            "_Quick mode sẽ vẫn dùng ảnh, nhưng Full mode phân tích sâu hơn\\. Tiếp tục\\?_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
 
     summary = brief.summary_text()
     # Escape for markdown
@@ -1514,11 +1653,23 @@ def build_app(token: str) -> Application:
                 CommandHandler("skip", step_moodboard_notes),
             ],
             MOODBOARD_IMAGES: [
-                # Accept both compressed photos AND images sent as files
+                # Accept compressed photos AND images sent as files
                 MessageHandler(filters.PHOTO, step_moodboard_image),
                 MessageHandler(filters.Document.IMAGE, step_moodboard_image),
                 CommandHandler("done", step_moodboard_done),
                 CommandHandler("skip", step_moodboard_skip),
+            ],
+            LOGO_INSPIRATION: [
+                MessageHandler(filters.PHOTO, step_logo_inspiration_image),
+                MessageHandler(filters.Document.IMAGE, step_logo_inspiration_image),
+                CommandHandler("done", step_logo_inspiration_done),
+                CommandHandler("skip", step_logo_inspiration_skip),
+            ],
+            PATTERN_INSPIRATION: [
+                MessageHandler(filters.PHOTO, step_pattern_inspiration_image),
+                MessageHandler(filters.Document.IMAGE, step_pattern_inspiration_image),
+                CommandHandler("done", step_pattern_inspiration_done),
+                CommandHandler("skip", step_pattern_inspiration_skip),
             ],
             KEYWORDS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_keywords),

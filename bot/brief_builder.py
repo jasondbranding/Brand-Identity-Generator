@@ -35,7 +35,9 @@ class ConversationBrief:
     keywords: List[str] = field(default_factory=list)
     color_preferences: str = ""  # user-suggested colors / palette direction
     moodboard_notes: str = ""
-    moodboard_image_paths: List[Path] = field(default_factory=list)  # downloaded Telegram photos
+    moodboard_image_paths: List[Path] = field(default_factory=list)    # general aesthetic refs
+    logo_inspiration_paths: List[Path] = field(default_factory=list)   # logo inspiration images
+    pattern_inspiration_paths: List[Path] = field(default_factory=list) # pattern/banner refs
 
     # Pipeline settings
     mode: str = "full"  # "full" | "quick"
@@ -66,8 +68,16 @@ class ConversationBrief:
             lines.append(f"🎨 *Colors:* {self.color_preferences[:80]}{'...' if len(self.color_preferences) > 80 else ''}")
         if self.moodboard_notes:
             lines.append(f"🖼 *Moodboard:* {self.moodboard_notes[:80]}...")
-        if self.moodboard_image_paths:
-            lines.append(f"📸 *Images:* {len(self.moodboard_image_paths)} moodboard photo(s)")
+        total_imgs = len(self.moodboard_image_paths) + len(self.logo_inspiration_paths) + len(self.pattern_inspiration_paths)
+        if total_imgs:
+            parts = []
+            if self.moodboard_image_paths:
+                parts.append(f"{len(self.moodboard_image_paths)} moodboard")
+            if self.logo_inspiration_paths:
+                parts.append(f"{len(self.logo_inspiration_paths)} logo refs")
+            if self.pattern_inspiration_paths:
+                parts.append(f"{len(self.pattern_inspiration_paths)} pattern refs")
+            lines.append(f"📸 *Images:* {', '.join(parts)}")
         lines.append(f"\n⚙️ *Mode:* {'🎨 Full (4 directions)' if self.mode == 'full' else '⚡ Quick (2 directions)'}")
         return "\n".join(lines)
 
@@ -106,8 +116,21 @@ class ConversationBrief:
         if self.color_preferences:
             sections.append(f"## Color Preferences\n{self.color_preferences}\n")
 
-        if self.moodboard_notes:
-            sections.append(f"## Moodboard\n{self.moodboard_notes}\n")
+        if self.moodboard_notes or self.moodboard_image_paths or self.logo_inspiration_paths or self.pattern_inspiration_paths:
+            moodboard_lines = []
+            if self.moodboard_notes:
+                moodboard_lines.append(self.moodboard_notes)
+            if self.logo_inspiration_paths:
+                moodboard_lines.append(
+                    f"\n### Logo Inspiration\n"
+                    + "\n".join(f"- {p.name}" for p in self.logo_inspiration_paths)
+                )
+            if self.pattern_inspiration_paths:
+                moodboard_lines.append(
+                    f"\n### Pattern & Layout Inspiration\n"
+                    + "\n".join(f"- {p.name}" for p in self.pattern_inspiration_paths)
+                )
+            sections.append(f"## Moodboard\n" + "\n".join(moodboard_lines) + "\n")
 
         if self.keywords:
             kw_lines = "\n".join(f"- {kw}" for kw in self.keywords)
@@ -126,10 +149,24 @@ class ConversationBrief:
         brief_path = tmp / "brief.md"
         brief_path.write_text(self.to_brief_md(), encoding="utf-8")
 
-        # Copy moodboard images into temp dir so parser finds them
+        # Copy all inspiration images into temp dir, organised in subfolders
         for img_path in self.moodboard_image_paths:
             if img_path.exists():
                 dest = tmp / img_path.name
+                dest.write_bytes(img_path.read_bytes())
+
+        logo_dir = tmp / "logo_inspiration"
+        for img_path in self.logo_inspiration_paths:
+            if img_path.exists():
+                logo_dir.mkdir(exist_ok=True)
+                dest = logo_dir / img_path.name
+                dest.write_bytes(img_path.read_bytes())
+
+        pattern_dir = tmp / "pattern_inspiration"
+        for img_path in self.pattern_inspiration_paths:
+            if img_path.exists():
+                pattern_dir.mkdir(exist_ok=True)
+                dest = pattern_dir / img_path.name
                 dest.write_bytes(img_path.read_bytes())
 
         return tmp
