@@ -375,16 +375,12 @@ def _next_unfilled_state(brief: "ConversationBrief") -> int:
         return AUDIENCE
     if not brief.tone:
         return TONE
-    if not brief.core_promise:          # sentinel "-" is truthy → skips correctly
-        return CORE_PROMISE
     if not brief.geography:             # same
         return GEOGRAPHY
     if not (brief.competitors_direct or brief.competitors_aspirational or brief.competitors_avoid):
         return COMPETITORS
     if not brief.keywords:              # ["-"] is truthy → skips correctly
         return KEYWORDS
-    if not brief.color_preferences:    # same
-        return COLOR_PREFERENCES
     return MODE_CHOICE
 
 
@@ -1888,10 +1884,6 @@ def build_app(token: str) -> Application:
                 CallbackQueryHandler(step_tone_callback, pattern="^tone_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_tone_text),
             ],
-            CORE_PROMISE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, step_core_promise),
-                CommandHandler("skip", step_core_promise),
-            ],
             GEOGRAPHY: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_geography),
                 CommandHandler("skip", step_geography),
@@ -1918,10 +1910,6 @@ def build_app(token: str) -> Application:
             KEYWORDS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_keywords),
                 CommandHandler("skip", step_keywords),
-            ],
-            COLOR_PREFERENCES: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, step_color_preferences),
-                CommandHandler("skip", step_color_preferences),
             ],
             MODE_CHOICE: [CallbackQueryHandler(step_mode_callback, pattern="^mode_")],
             CONFIRM:     [CallbackQueryHandler(step_confirm_callback, pattern="^confirm_")],
