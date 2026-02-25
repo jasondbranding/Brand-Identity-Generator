@@ -132,6 +132,13 @@ SKIP_PHRASES = {
     "để sau", "nope", "n/a", "na", "no", "không điền", "bỏ trống",
     "để trống", "chưa", "chưa biết", "kh", "tạm bỏ", "bỏ qua đi",
     "không quan trọng", "chưa nghĩ ra",
+    # "let AI decide" variants
+    "nghĩ hộ", "nghĩ giúp", "bạn nghĩ hộ", "nghĩ hộ được không",
+    "nghĩ hộ đi", "để ai nghĩ", "ai tự nghĩ", "để bạn nghĩ",
+    "tự nghĩ đi", "ai tự chọn", "để ai chọn", "để bạn chọn",
+    "tự chọn đi", "bạn tự chọn", "ai quyết", "để ai quyết",
+    "random", "tuỳ", "tùy", "tùy bạn", "tuỳ bạn", "tuỳ ai",
+    "tùy ai", "không chắc", "ko chắc", "k chắc", "chưa chắc",
 }
 
 BACK_PHRASES = {
@@ -150,7 +157,7 @@ def detect_intent(text: str) -> Optional[str]:
     if normalized in SKIP_PHRASES:
         return "skip"
     # Fuzzy skip for short phrases containing skip keywords
-    if len(normalized) < 25 and any(p in normalized for p in SKIP_PHRASES):
+    if len(normalized) < 40 and any(p in normalized for p in SKIP_PHRASES):
         return "skip"
     return None
 
@@ -355,6 +362,21 @@ def _next_unfilled_state(brief: "ConversationBrief") -> int:
     if not brief.color_preferences:
         return COLOR_PREFERENCES
     return MODE_CHOICE
+
+
+def _state_question_text(state: int) -> str:
+    """Return the question text for a given state (for use in callback-query follow-ups)."""
+    return {
+        PRODUCT:      "*Mô tả ngắn về sản phẩm/dịch vụ?*\n_\\(ví dụ: SaaS platform giúp logistics track shipments bằng AI\\)_",
+        AUDIENCE:     "*Target audience là ai?*\n_\\(ví dụ: Ops managers tại mid\\-market e\\-commerce\\)_",
+        TONE:         "*Tone/cá tính thương hiệu?*\n_Chọn một trong các hướng dưới đây, hoặc tự mô tả\\:_",
+        CORE_PROMISE: "*Core promise / câu tagline định hướng?*\n_\\(optional — gõ /skip để bỏ qua\\)_",
+        GEOGRAPHY:    "*Geography / thị trường mục tiêu?*\n_\\(optional — gõ /skip để bỏ qua\\)_",
+        COMPETITORS:  "*Đối thủ cạnh tranh?*\n_\\(Direct/Aspirational/Avoid — hoặc /skip\\)_",
+        MOODBOARD_NOTES: "*Moodboard notes?*\n_\\(optional — gõ /skip để bỏ qua\\)_",
+        KEYWORDS:     "*Keywords thương hiệu?*\n_\\(optional — /skip để bỏ qua\\)_",
+        COLOR_PREFERENCES: "🎨 *Màu sắc ưu tiên?*\n_\\(optional — /skip để AI tự chọn\\)_",
+    }.get(state, "*Chọn chế độ generate:*")
 
 
 async def _ask_for_state(
@@ -829,14 +851,20 @@ async def step_tone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
 
     if data == "tone_skip":
+        brief = get_brief(context)
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await query.edit_message_text(
+                "⏭ Tone bỏ qua — AI sẽ tự chọn\\.\n\n*Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
         await query.edit_message_text(
-            "⏭ Tone bỏ qua — AI sẽ tự chọn\\.\n\n"
-            "*Core promise / câu tagline định hướng?*\n"
-            "_\\(optional — ví dụ: \"You'll always know before your customers do\\.\"\\)_\n"
-            "_Gõ /skip để bỏ qua_",
+            f"⏭ Tone bỏ qua — AI sẽ tự chọn\\.\n\n{_state_question_text(next_state)}",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        return CORE_PROMISE
+        return next_state
 
     if data == "tone_custom":
         context.user_data[TONE_CUSTOM_KEY] = True
@@ -849,14 +877,29 @@ async def step_tone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     brief.tone = TONE_MAP.get(data, "")
     label = data.replace("tone_", "").replace("_", " ").title()
+    next_state = _next_unfilled_state(brief)
+
+    if next_state == MODE_CHOICE:
+        summary_line = f"✅ Tone: *{escape_md(label)}*\n\n*Chọn chế độ generate:*"
+        await query.edit_message_text(
+            summary_line,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=MODE_KEYBOARD,
+        )
+        return MODE_CHOICE
+
+    # Show tone confirmation then ask next unfilled field in a follow-up message
     await query.edit_message_text(
-        f"✅ Tone: *{escape_md(label)}*\n\n"
-        f"*Core promise / câu định hướng?*\n"
-        f"_\\(optional — ví dụ: \"You'll always know before your customers do\\.\"\\)_\n"
-        f"_Gõ /skip để bỏ qua_",
+        f"✅ Tone: *{escape_md(label)}*",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
-    return CORE_PROMISE
+    # Send the next question as a new message (can't use reply_text on a callback query edit)
+    await query.message.reply_text(
+        _state_question_text(next_state),
+        parse_mode=ParseMode.MARKDOWN_V2,
+        **({"reply_markup": TONE_KEYBOARD} if next_state == TONE else {}),
+    )
+    return next_state
 
 
 async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -866,13 +909,11 @@ async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return await handle_back(update, context)
     if intent == "skip":
         push_history(context, TONE)
-        await update.message.reply_text(
-            "⏭ Tone bỏ qua\\.\n\n"
-            "*Core promise / câu tagline định hướng?*\n"
-            "_Gõ /skip để bỏ qua_",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return CORE_PROMISE
+        brief = get_brief(context)
+        next_state = _next_unfilled_state(brief)
+        await send_typing(update)
+        return await _ask_for_state(update, context, next_state)
+
     brief = get_brief(context)
     text = update.message.text.strip()
 
@@ -899,13 +940,12 @@ async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if context.user_data.pop(TONE_CUSTOM_KEY, False):
         brief.tone = text
         await send_typing(update)
+        next_state = _next_unfilled_state(brief)
         await update.message.reply_text(
-            f"✅ Tone: _{escape_md(brief.tone)}_\n\n"
-            f"*Core promise / câu định hướng?*\n"
-            f"_\\(optional — gõ /skip để bỏ qua\\)_",
+            f"✅ Tone: _{escape_md(brief.tone)}_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        return CORE_PROMISE
+        return await _ask_for_state(update, context, next_state)
     # Fallback: treat as brand name re-entry (shouldn't happen)
     return TONE
 
@@ -942,13 +982,9 @@ async def step_core_promise(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if text.lower() != "/skip" and intent != "skip":
         brief.core_promise = text
     await send_typing(update)
-    await update.message.reply_text(
-        "*Geography / thị trường mục tiêu?*\n"
-        "_\\(optional — ví dụ: \"Vietnam, SEA B2B\" hoặc \"Global English\\-speaking\"\\)_\n"
-        "_Gõ /skip để bỏ qua_",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return GEOGRAPHY
+    # Jump to the actual next unfilled state (geography may already be filled from bulk input)
+    next_state = _next_unfilled_state(brief)
+    return await _ask_for_state(update, context, next_state)
 
 
 # ── Step 6: Geography ─────────────────────────────────────────────────────────
@@ -983,16 +1019,9 @@ async def step_geography(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if text.lower() != "/skip" and intent != "skip":
         brief.geography = text
     await send_typing(update)
-    await update.message.reply_text(
-        "*Đối thủ cạnh tranh?*\n\n"
-        "Bạn có thể nhập theo format:\n"
-        "`Direct: CompanyA, CompanyB`\n"
-        "`Aspirational: BrandX, BrandY`\n"
-        "`Avoid: OldCorp`\n\n"
-        "_Hoặc chỉ liệt kê tên, hoặc /skip_",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return COMPETITORS
+    # Jump to the actual next unfilled state (competitors may already be filled)
+    next_state = _next_unfilled_state(brief)
+    return await _ask_for_state(update, context, next_state)
 
 
 # ── Step 7: Competitors ───────────────────────────────────────────────────────
@@ -1045,13 +1074,9 @@ async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 break
 
     await send_typing(update)
-    await update.message.reply_text(
-        "*Moodboard notes?*\n"
-        "_\\(optional — mô tả aesthetic bạn muốn, ví dụ: \"Minimal như Linear, accent màu navy\"\\)_\n"
-        "_Gõ /skip để bỏ qua_",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return MOODBOARD_NOTES
+    # Jump to the actual next unfilled state (moodboard may already be filled)
+    next_state = _next_unfilled_state(brief)
+    return await _ask_for_state(update, context, next_state)
 
 
 # ── Step 8: Moodboard Notes ───────────────────────────────────────────────────
