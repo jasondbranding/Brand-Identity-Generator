@@ -351,12 +351,30 @@ def generate_social_posts(assets_map: dict) -> dict:
         secondary_hex = next((c.hex for c in direction.colors if c.role == "secondary"), "#666666")
         accent_hex    = next((c.hex for c in direction.colors if c.role == "accent"),    "#999999")
 
-        # Copy text map
+        # Copy text map — brief copy takes priority over AI-generated direction copy
+        # Priority: brief (locked) → direction AI-generated → fallback default
+        _brief_announcement = getattr(assets, "brief_announcement_copy", "")
+        _brief_slogan        = getattr(assets, "brief_ad_slogan", "")
+
         copy_map = {
-            "collab_post":        "",                                       # no copy for collab
-            "announcement_post":  getattr(direction, "announcement_copy", "") or f"Something new from {brand_name}.",
-            "ads_post":           getattr(direction, "ad_slogan", "")       or brand_name,
+            "collab_post":        "",   # no copy for collab — visual only
+            "announcement_post":  (
+                _brief_announcement                             # 1st: brief (locked)
+                or getattr(direction, "announcement_copy", "") # 2nd: AI-generated per direction
+                or f"Something new from {brand_name}."         # 3rd: fallback
+            ),
+            "ads_post": (
+                _brief_slogan                                   # 1st: brief (locked)
+                or getattr(direction, "ad_slogan", "")          # 2nd: AI-generated per direction
+                or brand_name                                   # 3rd: fallback
+            ),
         }
+
+        # Log copy source for transparency
+        if _brief_announcement:
+            console.print(f"  [dim]announcement copy: using brief copy (locked)[/dim]")
+        if _brief_slogan:
+            console.print(f"  [dim]ad slogan: using brief copy (locked)[/dim]")
 
         # Logo to use (prefer transparent, fall back to regular logo)
         logo_path = assets.logo_transparent or assets.logo

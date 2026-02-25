@@ -192,6 +192,12 @@ announcement_copy: 10–18 words for a brand announcement post on X.
 - Sounds exciting, human, slightly cryptic
 - Written as if the brand is sharing news
 
+⚠️ COPY OVERRIDE RULE — CRITICAL:
+If the user prompt contains a "PRE-WRITTEN COPY" section, those values are LOCKED.
+You MUST use them verbatim in tagline / ad_slogan / announcement_copy for EVERY direction.
+Do NOT alter, improve, or paraphrase them. Copy them exactly as written.
+Only generate copy freely if no pre-written values are provided.
+
 ## IMAGE PROMPT QUALITY GUIDELINES — CRITICAL
 
 The image prompts you generate are fed directly to an AI image generator. Vague prompts produce generic, unusable images. Specific, detailed prompts produce high-quality brand assets.

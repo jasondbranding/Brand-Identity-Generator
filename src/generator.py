@@ -41,21 +41,32 @@ class DirectionAssets:
     logo_black: Optional[Path] = field(default=None)                # dark logo on transparent bg
     logo_transparent: Optional[Path] = field(default=None)          # original logo, white removed
 
+    # Pre-written copy from brief — override AI-generated copy if set
+    brief_tagline: str = ""             # from "## Tagline" in brief.md
+    brief_ad_slogan: str = ""           # from "## Slogan" / "## Ad Slogan" in brief.md
+    brief_announcement_copy: str = ""   # from "## Announcement" in brief.md
+
 
 def generate_all_assets(
     directions: list,
     output_dir: Path,
     brief_keywords: Optional[list] = None,
     brand_name: str = "",
+    brief_tagline: str = "",
+    brief_ad_slogan: str = "",
+    brief_announcement_copy: str = "",
 ) -> dict:
     """
     Generate bg + logo + pattern for every direction.
 
     Args:
-        directions:    List of BrandDirection objects
-        output_dir:    Directory to save assets
-        brief_keywords: Optional brand keywords for reference image matching
-        brand_name:    Actual brand name from the brief (e.g. "Whales Market")
+        directions:              List of BrandDirection objects
+        output_dir:              Directory to save assets
+        brief_keywords:          Optional brand keywords for reference image matching
+        brand_name:              Actual brand name from the brief (e.g. "Whales Market")
+        brief_tagline:           Pre-written tagline from brief (overrides AI-generated)
+        brief_ad_slogan:         Pre-written ad slogan from brief (overrides AI-generated)
+        brief_announcement_copy: Pre-written announcement copy from brief (overrides AI-generated)
 
     Returns:
         Dict mapping option_number → DirectionAssets
@@ -72,6 +83,9 @@ def generate_all_assets(
             direction, output_dir,
             brief_keywords=brief_keywords,
             brand_name=brand_name,
+            brief_tagline=brief_tagline,
+            brief_ad_slogan=brief_ad_slogan,
+            brief_announcement_copy=brief_announcement_copy,
         )
         results[direction.option_number] = assets
 
@@ -83,6 +97,9 @@ def _generate_direction_assets(
     output_dir: Path,
     brief_keywords: Optional[list] = None,
     brand_name: str = "",
+    brief_tagline: str = "",
+    brief_ad_slogan: str = "",
+    brief_announcement_copy: str = "",
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
@@ -124,6 +141,9 @@ def _generate_direction_assets(
         logo_white=variants.get("logo_white"),
         logo_black=variants.get("logo_black"),
         logo_transparent=variants.get("logo_transparent"),
+        brief_tagline=brief_tagline,
+        brief_ad_slogan=brief_ad_slogan,
+        brief_announcement_copy=brief_announcement_copy,
     )
 
 

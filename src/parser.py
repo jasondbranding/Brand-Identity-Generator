@@ -1,6 +1,13 @@
 """
 Brief parser — reads brief.md, keywords.md, and moodboard notes
 into a structured BriefData object for both Full and Quick modes.
+
+Optional copy overrides in brief.md:
+  ## Tagline          → short brand tagline (5–10 words)
+  ## Slogan           → punchy ad slogan (3–6 words)   [also: ## Ad Slogan]
+  ## Announcement     → announcement post copy (10–18 words)
+
+If provided, pipeline uses these verbatim instead of AI-generating copy.
 """
 
 from __future__ import annotations
@@ -8,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -18,6 +25,15 @@ class BriefData:
     brand_name: str         # Extracted from "## Brand Name" section
     keywords: List[str]     # Brand personality keywords
     moodboard_notes: str    # Moodboard/creative direction notes (full mode)
+
+    # Optional copy overrides — if set, pipeline uses these verbatim instead of AI-generated copy
+    tagline: str = ""           # Brand tagline (5–10 words)       — "## Tagline"
+    ad_slogan: str = ""         # Punchy ad slogan (3–6 words)      — "## Slogan" / "## Ad Slogan"
+    announcement_copy: str = "" # Announcement post copy (10–18 w)  — "## Announcement"
+
+    def has_copy(self) -> bool:
+        """True if brief contains any pre-written copy fields."""
+        return bool(self.tagline or self.ad_slogan or self.announcement_copy)
 
     def to_prompt_block(self) -> str:
         """Format brief data for Claude's user message."""
@@ -42,6 +58,22 @@ class BriefData:
                 self.moodboard_notes.strip(),
             ]
 
+        # Surface pre-written copy so Claude aligns tone and uses it verbatim
+        if self.has_copy():
+            parts += ["", "## PRE-WRITTEN COPY (use these exactly — do not rewrite)"]
+            if self.tagline:
+                parts.append(f"Tagline: {self.tagline}")
+            if self.ad_slogan:
+                parts.append(f"Ad slogan: {self.ad_slogan}")
+            if self.announcement_copy:
+                parts.append(f"Announcement copy: {self.announcement_copy}")
+            parts += [
+                "",
+                "⚠️  The copy fields above are LOCKED. "
+                "Use them verbatim in tagline / ad_slogan / announcement_copy for ALL directions. "
+                "Do not paraphrase, improve, or alter them.",
+            ]
+
         if self.mode == "quick":
             parts += [
                 "",
@@ -52,6 +84,27 @@ class BriefData:
         return "\n".join(parts)
 
 
+def _extract_section(text: str, *section_names: str) -> str:
+    """
+    Extract first non-empty line from any matching ## Section heading in text.
+    Returns empty string if not found.
+    Accepts multiple heading aliases (e.g. "Slogan", "Ad Slogan").
+    """
+    pattern = "|".join(re.escape(n) for n in section_names)
+    in_section = False
+    for line in text.splitlines():
+        if re.match(rf"##\s*({pattern})\s*$", line.strip(), re.IGNORECASE):
+            in_section = True
+            continue
+        if in_section:
+            if line.startswith("#"):
+                break
+            stripped = line.strip()
+            if stripped:
+                return stripped
+    return ""
+
+
 def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
     """
     Parse a brief directory into BriefData.
@@ -59,6 +112,11 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
     Expected structure:
       full mode:  brief_dir/brief.md, brief_dir/keywords.md, brief_dir/moodboard/notes.md
       quick mode: brief_dir/brief.md  (keywords embedded in brief or separate keywords.md)
+
+    Optional copy sections in brief.md (any order):
+      ## Tagline
+      ## Slogan  (or ## Ad Slogan)
+      ## Announcement
     """
     root = Path(brief_dir)
 
@@ -71,22 +129,15 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
 
     brief_text = brief_file.read_text(encoding="utf-8")
 
-    # Brand name — extract from "## Brand Name" section
-    brand_name = ""
-    _in_bn = False
-    for _line in brief_text.splitlines():
-        if re.match(r"##\s*brand\s*name", _line.strip(), re.IGNORECASE):
-            _in_bn = True
-            continue
-        if _in_bn:
-            if _line.startswith("#"):
-                break
-            _stripped = _line.strip()
-            if _stripped:
-                brand_name = _stripped
-                break
+    # ── Brand name ─────────────────────────────────────────────────────────────
+    brand_name = _extract_section(brief_text, "Brand Name")
 
-    # Keywords — optional file, also check inside brief for an inline ## Keywords section
+    # ── Copy fields (optional) ─────────────────────────────────────────────────
+    tagline           = _extract_section(brief_text, "Tagline")
+    ad_slogan         = _extract_section(brief_text, "Slogan", "Ad Slogan")
+    announcement_copy = _extract_section(brief_text, "Announcement", "Announcement Copy")
+
+    # ── Keywords ───────────────────────────────────────────────────────────────
     keywords: list[str] = []
     keywords_file = root / "keywords.md"
     if keywords_file.exists():
@@ -95,7 +146,6 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
             if stripped and not stripped.startswith("#"):
                 keywords.append(stripped.lstrip("- ").strip())
     else:
-        # Try to extract from brief inline
         in_kw_section = False
         for line in brief_text.splitlines():
             if line.lower().startswith("## keyword"):
@@ -108,7 +158,7 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
                 if stripped:
                     keywords.append(stripped.lstrip("- ").strip())
 
-    # Moodboard notes (full mode only)
+    # ── Moodboard notes (full mode only) ───────────────────────────────────────
     moodboard_notes = ""
     if mode == "full":
         moodboard_file = root / "moodboard" / "notes.md"
@@ -121,4 +171,7 @@ def parse_brief(brief_dir: str, mode: str = "full") -> BriefData:
         brand_name=brand_name,
         keywords=keywords,
         moodboard_notes=moodboard_notes,
+        tagline=tagline,
+        ad_slogan=ad_slogan,
+        announcement_copy=announcement_copy,
     )

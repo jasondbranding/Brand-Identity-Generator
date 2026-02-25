@@ -20,3 +20,14 @@ FedEx Logistics, Project44, Flexport — all heavy, enterprise-feeling, dashboar
 
 ## What makes NuRange different
 Radical simplicity. One screen. AI-powered, not AI-buzzworded. Feels like Notion met Stripe and decided to solve logistics.
+
+## Copy (optional — remove section to let AI generate)
+
+## Tagline
+You'll always know before your customers do.
+
+## Slogan
+Know first. Act fast.
+
+## Announcement
+NuRange is live. One dashboard. Zero surprises. The future of logistics visibility starts now.
