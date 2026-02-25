@@ -1046,21 +1046,79 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: 
         return []
 
 
-def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 5) -> str:
+def _extract_guide_section(content: str, label: str) -> str:
     """
-    Find and COMBINE the top-N most relevant style guides for this label type.
+    Extract the relevant section from a style guide for the given label.
 
-    Instead of returning a single best-match guide, blends multiple relevant
-    guides so the model works at the intersection of several visual languages.
+    Each guide file may contain both `### For LOGOS:` and `### For PATTERNS:` sections.
+    This function strips frontmatter/code fences and returns only the label-relevant section.
 
-    Example: "premium fintech minimal" could blend:
-      industry_finance_crypto  → domain-specific rules (precision, trust)
-      style_minimal_geometric  → formal geometry constraints
-      style_elegant_editorial  → refinement / luxury cues
-    → Combined, the model has richer, more specific constraints than any single guide.
+    Falls back to the full (cleaned) content if no section marker is found.
+    """
+    # ── Strip YAML frontmatter (everything between leading `---` / ``` markers) ──
+    lines = content.splitlines()
+    start_idx = 0
 
-    Each contributing guide is capped at 25 lines to prevent prompt bloat.
-    Total output is capped at ~100 lines.
+    # Skip opening frontmatter: lines that are YAML keys or --- / ``` fences
+    # Frontmatter ends when we see a line starting with `###` or `##` or `#`
+    in_frontmatter = True
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # YAML frontmatter markers
+        if stripped in ("---", "```", "~~~"):
+            continue
+        # YAML key-value pairs (key: value)
+        if in_frontmatter and ":" in stripped and not stripped.startswith("#") and not stripped.startswith("*") and not stripped.startswith("-"):
+            continue
+        # First real content line
+        in_frontmatter = False
+        start_idx = i
+        break
+
+    body_lines = lines[start_idx:]
+
+    # ── Find the section marker for this label ─────────────────────────────────
+    # Guides use: `### For LOGOS:` and `### For PATTERNS:`
+    section_header = "for logos:" if label == "logo" else "for patterns:"
+    opposite_header = "for patterns:" if label == "logo" else "for logos:"
+
+    section_start: int = -1
+    section_end: int = len(body_lines)
+
+    for i, line in enumerate(body_lines):
+        low = line.lower().strip()
+        if section_header in low and low.startswith("#"):
+            section_start = i
+        elif section_start >= 0 and opposite_header in low and low.startswith("#"):
+            section_end = i
+            break
+
+    if section_start >= 0:
+        # Found a dedicated section — use it (skip the section header line itself)
+        relevant = body_lines[section_start + 1 : section_end]
+    else:
+        # No section marker — use the whole body (single-type guide)
+        relevant = body_lines
+
+    # ── Clean: remove empty lines at start/end, drop stray code fence markers ──
+    cleaned = [
+        l for l in relevant
+        if l.strip() and l.strip() not in ("```", "~~~", "---")
+    ]
+
+    return "\n".join(cleaned)
+
+
+def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 3) -> str:
+    """
+    Find and blend the top-N most relevant style guides for this label type.
+
+    Fixes vs old implementation:
+      - Strips YAML frontmatter and code fences properly
+      - Extracts only the label-relevant section (logos vs patterns)
+      - Reduces top_n from 5 → 3 to keep blended guide focused
+      - Per-guide cap reduced from 25 → 30 lines of actionable content (no meta)
+
     Returns "" if no guides match.
     """
     if not brief_keywords:
@@ -1076,10 +1134,10 @@ def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 5)
             return ""
 
         kw_set = {k.lower().strip() for k in brief_keywords if k}
-        scored_guides: list = []   # (score, stem_name, content)
+        scored_guides: list = []   # (score, stem_name, raw_content)
 
         for guide_path in sorted(guides_dir.glob("*.md")):
-            cat_words = set(guide_path.stem.lower().replace("_", " ").split())
+            cat_words = set(guide_path.stem.lower().replace("-", "_").replace("_", " ").split())
             score = len(kw_set & cat_words)
             if score > 0:
                 try:
@@ -1094,30 +1152,28 @@ def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 5)
         scored_guides.sort(key=lambda x: -x[0])
         top_guides = scored_guides[:top_n]
 
-        if len(top_guides) == 1:
-            # Single match — return as-is (no blending needed)
-            return top_guides[0][2]
-
-        # ── Blend multiple guides ──────────────────────────────────────────
-        # Cap each guide to 25 actionable lines (skip YAML frontmatter)
-        LINE_CAP = 25
+        # ── Extract and clean the relevant section from each guide ─────────────
+        LINE_CAP = 30   # per-guide line cap (actionable content only)
         parts = []
-        for _, stem_name, content in top_guides:
+        for _, stem_name, raw_content in top_guides:
             readable_name = stem_name.replace("_", " ").title()
-            lines = [
-                l for l in content.splitlines()
-                if not l.startswith("---") and l.strip()
-            ][:LINE_CAP]
-            parts.append(
-                f"### {readable_name}\n" + "\n".join(lines)
-            )
+            section = _extract_guide_section(raw_content, label)
+            section_lines = section.splitlines()[:LINE_CAP]
+            if section_lines:
+                parts.append(f"### {readable_name}\n" + "\n".join(section_lines))
+
+        if not parts:
+            return ""
 
         blend_names = ", ".join(g[1] for g in top_guides)
-        console.print(f"  [dim]style guides blended: {blend_names}[/dim]")
+        console.print(f"  [dim]style guides ({label}): {blend_names}[/dim]")
+
+        if len(parts) == 1:
+            return parts[0]
 
         return (
-            "## BLENDED STYLE REFERENCE\n"
-            f"_(synthesised from: {blend_names})_\n\n"
+            "## STYLE REFERENCE\n"
+            f"_(from: {blend_names})_\n\n"
             + "\n\n---\n\n".join(parts)
         )
 
