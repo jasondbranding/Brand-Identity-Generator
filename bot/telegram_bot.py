@@ -1454,7 +1454,7 @@ async def step_ref_choice_show(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             media_group.append(
                 InputMediaPhoto(
-                    media=open(p, "rb"),
+                    media=p.read_bytes(),
                     caption=str(i),
                 )
             )
@@ -1739,7 +1739,7 @@ async def _run_pipeline_phase1(
             )
             media_group.append(
                 InputMediaPhoto(
-                    media=open(assets.logo, "rb"),
+                    media=assets.logo.read_bytes(),
                     caption=caption,
                     parse_mode=ParseMode.MARKDOWN_V2,
                 )
@@ -1971,20 +1971,20 @@ async def _run_logo_variants_and_palette_phase(
         await context.bot.send_message(
             chat_id=chat_id, text="🔤 *Logo variants*\\:", parse_mode=ParseMode.MARKDOWN_V2
         )
-        media = [InputMediaPhoto(media=open(p, "rb"), caption=lbl) for p, lbl in variants_to_send]
+        media = [InputMediaPhoto(media=p.read_bytes(), caption=lbl) for p, lbl in variants_to_send]
         try:
             await context.bot.send_media_group(chat_id=chat_id, media=media)
         except Exception:
             for p, lbl in variants_to_send:
                 try:
-                    await context.bot.send_document(chat_id=chat_id, document=open(p, "rb"), filename=p.name, caption=lbl)
+                    await context.bot.send_document(chat_id=chat_id, document=p.read_bytes(), filename=p.name, caption=lbl)
                 except Exception:
                     pass
 
     if svg_path and svg_path.exists():
         try:
             await context.bot.send_document(
-                chat_id=chat_id, document=open(svg_path, "rb"),
+                chat_id=chat_id, document=svg_path.read_bytes(),
                 filename=svg_path.name, caption="📐 Logo SVG vector",
             )
         except Exception as e:
@@ -2032,7 +2032,7 @@ async def _run_logo_variants_and_palette_phase(
         try:
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=open(palette_result.palette_png, "rb"),
+                document=palette_result.palette_png.read_bytes(),
                 filename=palette_result.palette_png.name,
             )
         except Exception as e:
@@ -2042,7 +2042,7 @@ async def _run_logo_variants_and_palette_phase(
         try:
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=open(palette_result.shades_png, "rb"),
+                document=palette_result.shades_png.read_bytes(),
                 filename=palette_result.shades_png.name,
                 caption="🌈 Shade scales",
             )
@@ -2129,32 +2129,90 @@ def _launch_palette_rerun(
     chat_id: int,
     refinement_feedback: Optional[str],
 ) -> None:
-    """Re-run palette generation with optional feedback."""
+    """Re-run palette generation only (skip logo variants — already done)."""
+    asyncio.create_task(
+        _run_palette_only_phase(context, chat_id, refinement_feedback)
+    )
+
+
+async def _run_palette_only_phase(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    refinement_feedback: Optional[str] = None,
+) -> None:
+    """Re-generate palette only — used for palette reroll/refine without re-running logo variants."""
     chosen_direction = context.user_data.get(CHOSEN_DIR_KEY)
     output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
     brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
     brief_dir = Path(brief_dir_str) if brief_dir_str else None
     api_key = os.environ.get("GEMINI_API_KEY", "")
-    brief = get_brief(context)
-    all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
 
-    # Find chosen assets
-    chosen_num = getattr(chosen_direction, "option_number", 1) if chosen_direction else 1
-    chosen_assets = all_assets.get(chosen_num)
-
-    asyncio.create_task(
-        _run_logo_variants_and_palette_phase(
-            context=context,
-            chat_id=chat_id,
-            chosen_direction=chosen_direction,
-            chosen_assets=chosen_assets,
-            output_dir=output_dir,
-            brief_dir=brief_dir,
-            brief=brief,
-            api_key=api_key,
-            refinement_feedback=refinement_feedback,
-        )
+    progress_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text="🎨 *Đang tạo lại bảng màu\\.\\.\\.*",
+        parse_mode=ParseMode.MARKDOWN_V2,
     )
+
+    def on_progress(msg: str) -> None:
+        asyncio.create_task(safe_edit(context, chat_id, progress_msg.message_id, msg))
+
+    runner = PipelineRunner(api_key=api_key)
+    palette_result = await runner.run_palette_phase(
+        direction=chosen_direction,
+        output_dir=output_dir,
+        brief_dir=brief_dir,
+        on_progress=on_progress,
+        refinement_feedback=refinement_feedback,
+    )
+
+    if not palette_result.success:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Palette thất bại\\:\n```\n{escape_md(palette_result.error[:400])}\n```",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    # Store updated palette data
+    context.user_data[ENRICHED_COLORS_KEY] = palette_result.enriched_colors
+    context.user_data[PALETTE_SHADES_KEY] = palette_result.palette_shades
+    context.user_data["palette_png"] = str(palette_result.palette_png) if palette_result.palette_png else None
+    context.user_data["shades_png"] = str(palette_result.shades_png) if palette_result.shades_png else None
+
+    # Send palette
+    if palette_result.palette_png and palette_result.palette_png.exists():
+        await safe_edit(context, chat_id, progress_msg.message_id, "✅ *Bảng màu mới hoàn thành\\!*")
+        try:
+            with open(palette_result.palette_png, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=chat_id, document=f, filename=palette_result.palette_png.name,
+                )
+        except Exception as e:
+            logger.warning(f"Palette send failed: {e}")
+
+    if palette_result.shades_png and palette_result.shades_png.exists():
+        try:
+            with open(palette_result.shades_png, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=chat_id, document=f, filename=palette_result.shades_png.name,
+                    caption="🌈 Shade scales",
+                )
+        except Exception as e:
+            logger.warning(f"Shades send failed: {e}")
+
+    # Palette HITL keyboard
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Chốt bảng màu", callback_data="palette_accept")],
+        [InlineKeyboardButton("✏️ Chỉnh sửa", callback_data="palette_refine")],
+        [InlineKeyboardButton("🔄 Tạo lại", callback_data="palette_reroll")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="👆 *Bạn muốn giữ bảng màu này hay chỉnh sửa?*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    context.user_data[PALETTE_REVIEW_FLAG] = True
 
 
 # ── Pattern ref phase ─────────────────────────────────────────────────────────
@@ -2251,7 +2309,7 @@ async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: 
         media = []
         for i, p in enumerate(ref_images, 1):
             try:
-                media.append(InputMediaPhoto(media=open(p, "rb"), caption=f"Pattern ref {i}"))
+                media.append(InputMediaPhoto(media=p.read_bytes(), caption=f"Pattern ref {i}"))
             except Exception:
                 pass
         if media:
@@ -2461,7 +2519,7 @@ async def _run_pattern_generation(
         try:
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=open(result.pattern_path, "rb"),
+                document=result.pattern_path.read_bytes(),
                 filename=result.pattern_path.name,
             )
         except Exception as e:
@@ -2615,7 +2673,7 @@ async def _run_mockup_and_zip_phase(
                     try:
                         await context.bot.send_document(
                             chat_id=chat_id,
-                            document=open(composited, "rb"),
+                            document=composited.read_bytes(),
                             filename=composited.name,
                             caption=f"🖼 Mockup: {pf.stem}",
                         )
@@ -2660,7 +2718,7 @@ async def _run_mockup_and_zip_phase(
         if zip_path and zip_path.exists():
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=open(zip_path, "rb"),
+                document=zip_path.read_bytes(),
                 filename=zip_path.name,
                 caption=f"📦 Brand Identity Package — {brief.brand_name}",
             )

@@ -154,6 +154,7 @@ def _parse_classification(
 def _gemini_classify(
     user_input: str,
     directions: List[BrandDirection],
+    history: Optional[List[BrandDirectionsOutput]] = None,
 ) -> Tuple[str, object]:
     """Call gemini-2.5-flash to classify free-form user feedback."""
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -163,6 +164,10 @@ def _gemini_classify(
     direction_list = "\n".join(
         f"  Option {d.option_number}: {d.direction_name}" for d in directions
     )
+    
+    past_iterations_info = ""
+    if history and len(history) > 1:
+        past_iterations_info = f"\nNote: The user is currently on iteration {len(history)-1}. They can revert to previous iterations if they want.\n"
 
     prompt = f"""\
 Classify this user feedback about brand identity directions into exactly one of these formats:
@@ -170,24 +175,30 @@ Classify this user feedback about brand identity directions into exactly one of 
 SELECT:<number>        — user wants to confirm/finalize a specific direction
 REMIX:<instructions>   — user wants to combine elements from multiple directions
 ADJUST:<instructions>  — user wants to modify or refine one direction
+REVERT:<iteration_num> — user wants to go back to a previous iteration's options
+ADVICE:<question>      — user is stuck, unsure, or asking for your consultation/advice
 QUIT                   — user wants to exit without selecting
 
-Available directions:
+Available directions (Current Iteration):
 {direction_list}
-
+{past_iterations_info}
 User said: "{user_input}"
 
 Rules:
 - If the user is satisfied with one direction and wants to proceed → SELECT
 - If the user mentions combining/mixing/taking from multiple options → REMIX
 - If the user wants changes to a direction → ADJUST
+- If the user wants to go back to previous options/older versions → REVERT (extract the iteration number if mentioned, else 0 for original)
+- If the user asks "which one is best?", "can you suggest?", "what do you think?" → ADVICE
 - If the user says quit/exit/stop/no → QUIT
-- For ADJUST/REMIX, rephrase the instruction clearly in English
+- For ADJUST/REMIX/ADVICE, rephrase the instruction or question clearly in English
 
 Respond with ONLY the classification on a single line. Examples:
 SELECT:2
 ADJUST:Option 1 but with warmer colors and less blue in the palette
 REMIX:Take the color palette from Option 1 and the typography from Option 3
+REVERT:0
+ADVICE:Which option do you think fits a modern tech startup best?
 QUIT"""
 
     try:
@@ -197,7 +208,12 @@ QUIT"""
             contents=prompt,
         )
         raw = (response.text or "").strip()
-        return _parse_classification(raw, directions)
+        
+        # Parse output
+        if ":" in raw:
+            intent, payload = raw.split(":", 1)
+            return (intent.strip(), payload.strip())
+        return (raw.strip(), None)
     except Exception as exc:
         console.print(f"  [yellow]⚠ Gemini classify failed ({exc}) — treating as ADJUST[/yellow]")
         return ("ADJUST", user_input)
@@ -206,6 +222,7 @@ QUIT"""
 def _classify_intent(
     user_input: str,
     directions: List[BrandDirection],
+    history: Optional[List[BrandDirectionsOutput]] = None,
 ) -> Tuple[str, object]:
     """
     Classify free-form user input without always hitting the API.
@@ -219,6 +236,13 @@ def _classify_intent(
     # ── Hard exits ────────────────────────────────────────────────────────────
     if lower in {"q", "quit", "exit", "thoát", "thoat", "bye"}:
         return ("QUIT", None)
+        
+    # ── Fast revert patterns ──────────────────────────────────────────────────
+    if lower in {"back", "undo", "revert", "quay lại", "trở lại"}:
+        if history and len(history) > 1:
+            return ("REVERT", len(history) - 2) # Go back 1 step
+        else:
+            return ("ADVICE", "I want to go back but there is no history to go back to. Please help me.")
 
     # ── Explicit select patterns ───────────────────────────────────────────────
     select_pats = [
@@ -240,7 +264,7 @@ def _classify_intent(
 
     # ── "done" / "perfect" with no number → Gemini to disambiguate ───────────
     # Fall through to Gemini for everything else
-    return _gemini_classify(user_input, directions)
+    return _gemini_classify(user_input, directions, history)
 
 
 # ── Human-in-the-loop ─────────────────────────────────────────────────────────
@@ -259,9 +283,12 @@ def refinement_loop(
       SELECT — confirm a direction
       REMIX  — combine elements from multiple directions
       ADJUST — modify a direction
+      REVERT — go back to a previous set of directions
+      ADVICE — ask the AI for advice or suggestions
       QUIT   — exit
     """
     current_output = initial_output
+    history = [initial_output]
     iteration = 0
 
     while True:
@@ -271,11 +298,25 @@ def refinement_loop(
             f"[bold cyan]{d.option_number}[/bold cyan] {d.direction_name}"
             for d in current_output.directions
         )
-        console.print(f"\n  Directions: {opts}\n")
+        console.print(f"\n  Directions (Iteration {iteration}): {opts}\n")
+        
+        # Proactive consultation offer
+        consult_offered = False
+        if iteration == 4:
+            console.print(
+                Panel(
+                    "🤖 [bold cyan]AI Assistant:[/bold cyan] Có vẻ không đúng ý bạn lắm nhỉ, cần tôi hỗ trợ bạn không? (Gõ 'có', 'yes' hoặc 'tư vấn')",
+                    border_style="cyan"
+                )
+            )
+            consult_offered = True
+            
         console.print(
             "  [dim]Describe what you want, e.g.:\n"
             "    'Option 2 looks good but make the palette warmer'\n"
             "    'Mix the logo style from 1 with the colors from 3'\n"
+            "    'I'm not sure, which one is best?' / 'Tư vấn giúp tôi' (AI Advice)\n"
+            "    'undo' / 'back' to go back a step\n"
             "    'go with option 2' / 'chọn option 1' / 'quit'[/dim]\n"
         )
 
@@ -283,9 +324,17 @@ def refinement_loop(
         if not user_input:
             continue
 
-        console.print("  [dim]→ Classifying...[/dim] ", end="")
-        intent, payload = _classify_intent(user_input, current_output.directions)
-        console.print(f"[bold]{intent}[/bold]" + (f": {payload}" if payload else ""))
+        # Check if they accepted the proactive consultation
+        lower_input = user_input.lower()
+        if consult_offered and lower_input in {"có", "co", "yes", "y", "ok", "tư vấn", "tu van", "đồng ý", "dong y"}:
+            intent, payload = "ADVICE", "I need help clarifying my vision. Please ask me diagnostic questions."
+        elif consult_offered and lower_input in {"không", "khong", "no", "n", "không cần", "thôi"}:
+            console.print("  [dim]Đã bỏ qua tư vấn. Mời bạn tiếp tục đưa ra yêu cầu chỉnh sửa.[/dim]")
+            continue
+        else:
+            console.print("  [dim]→ Classifying...[/dim] ", end="")
+            intent, payload = _classify_intent(user_input, current_output.directions, history)
+            console.print(f"[bold]{intent}[/bold]" + (f": {payload}" if payload else ""))
 
         # ── QUIT ──────────────────────────────────────────────────────────────
         if intent == "QUIT":
@@ -316,6 +365,82 @@ def refinement_loop(
             )
             _save_selection(selected, output_dir)
             break
+            
+        # ── REVERT ────────────────────────────────────────────────────────────
+        elif intent == "REVERT":
+            try:
+                target_iteration = int(payload)
+                if 0 <= target_iteration < len(history):
+                    current_output = history[target_iteration]
+                    iteration = target_iteration
+                    # slice history up to this point so 'next' starts fresh
+                    history = history[:target_iteration+1]
+                    console.print(f"\n[bold green]✓ Reverted to Iteration {iteration}[/bold green]")
+                else:
+                    console.print(f"  [yellow]⚠ Invalid iteration '{payload}'. History goes from 0 to {len(history)-1}.[/yellow]")
+            except Exception as e:
+                console.print(f"  [yellow]⚠ Failed to revert: {e}[/yellow]")
+                
+        # ── ADVICE ────────────────────────────────────────────────────────────
+        elif intent == "ADVICE":
+            question = str(payload)
+            console.print(f"\n[bold cyan]→ Asking AI: {question}[/bold cyan]")
+            
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if api_key:
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                
+                direction_list = "\n".join(
+                    f"Option {d.option_number}: {d.direction_name} - {d.rationale}" for d in current_output.directions
+                )
+                brief_text = getattr(brief, 'brief_text', str(brief))
+                
+                advice_prompt = f"""\
+You are an expert Brand Identity Strategist helping a user who is stuck after {iteration} iterations of logo/brand design.
+
+The user's original brief:
+{brief_text}
+
+User's current feedback/question: "{question}"
+
+Current Directions on the table:
+{direction_list}
+
+Your goal is to figure out WHY they are stuck and help them clarify their vision.
+Design blockages usually come from two reasons. Address them in your response by ASKING CLARIFYING QUESTIONS:
+
+1. INCOMPLETE STRATEGY: Is the brief missing key details? Ask them about:
+   - Their exact target audience.
+   - Key competitors.
+   - The core message/vibe they want to convey.
+   - Their unique selling proposition (unfair advantage).
+
+2. VAGUE AESTHETICS: Are they using vague words like "beautiful", "minimal", "fun", "impactful"?
+   - Challenge them to be specific.
+   - Propose 2-3 real-world famous brands that represent different nuances of their vague keyword (e.g., "If you say minimal, do you mean Apple's sleek tech minimalism, or Muji's warm organic minimalism?")
+   - Ask them to name 1-2 existing brands they want to look/feel like.
+
+Instructions:
+- Be empathetic, professional, and helpful.
+- Reply in the EXACT SAME LANGUAGE the user is speaking in their prompt (e.g. Vietnamese if they use Vietnamese).
+- Do NOT just spit out a generic printout of the directions. Ask them SPECIFIC DIAGNOSTIC QUESTIONS based on the brief and blockages to unblock them.
+- Format with clear bullet points.
+"""
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=advice_prompt,
+                    )
+                    console.print(Panel(
+                        response.text.strip(),
+                        title="[bold blue]AI Brand Consultant[/bold blue]",
+                        border_style="blue",
+                    ))
+                except Exception as e:
+                    console.print(f"  [yellow]⚠ AI Advice failed: {e}[/yellow]")
+            else:
+                 console.print("  [yellow]⚠ No API key found to ask for advice.[/yellow]")
 
         # ── REMIX / ADJUST ────────────────────────────────────────────────────
         elif intent in ("REMIX", "ADJUST"):
@@ -330,6 +455,10 @@ def refinement_loop(
 
             t0 = time.time()
             current_output = generate_directions(brief, refinement_feedback=instructions)
+            
+            # Save to history for reverting
+            history.append(current_output)
+            
             console.print(f"  [green]✓ Directions in {time.time() - t0:.1f}s[/green]\n")
 
             display_directions(current_output)
@@ -376,7 +505,49 @@ def refinement_loop(
 
 
 def _save_selection(selected, output_dir: Path) -> None:
-    """Save the confirmed direction to a selection.json file."""
+    """Save the confirmed direction to a selection.json file and vectorize the logo to SVG."""
+    import json
+    
+    # Check if we should vectorize the logo
+    try:
+        from src.generator import _slugify
+        slug = _slugify(selected.direction_name)
+        asset_dir = output_dir / f"option_{selected.option_number}_{slug}"
+        black_path = asset_dir / "logo_black.png"
+        
+        if black_path.exists():
+            console.print("  [dim]→ Vectorizing final logo to SVG (vtracer)...[/dim]")
+            svg_white_path = asset_dir / "logo_white.svg"
+            svg_black_path = asset_dir / "logo_black.svg"
+            
+            import vtracer
+            # Convert Black PNG to SVG
+            vtracer.convert_image_to_svg_py(
+                str(black_path),
+                str(svg_black_path),
+                colormode='binary',
+                hierarchical='stacked',
+                mode='spline',
+                filter_speckle=10, 
+                color_precision=8,
+                layer_difference=16,
+                corner_threshold=60,
+                length_threshold=4.0,
+                max_iterations=10,
+                splice_threshold=45,
+                path_precision=8
+            )
+            
+            # vtracer binary output always forces black shapes at the moment due to background logic
+            # To get a white SVG, we just take the black SVG and replace the fill color string.
+            if svg_black_path.exists():
+                black_svg_content = svg_black_path.read_text(encoding="utf-8")
+                white_svg_content = black_svg_content.replace('fill="#000000"', 'fill="#FFFFFF"').replace('fill="#141414"', 'fill="#FFFFFF"')
+                svg_white_path.write_text(white_svg_content, encoding="utf-8")
+                console.print(f"  [green]✓[/green] Saved vector logos: {svg_black_path.name} & {svg_white_path.name}")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Final SVG vectorization failed: {e}[/yellow]")
+
     selection_path = output_dir / "selection.json"
     selection_path.write_text(
         json.dumps(selected.model_dump(), indent=2), encoding="utf-8"

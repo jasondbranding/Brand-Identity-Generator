@@ -157,10 +157,11 @@ Your task: Write a comprehensive `style.md` file that captures the dominant visu
 
 ### For PATTERNS:
 1. **Motif Rules** — dominant motif types, geometric principles
-2. **Grid System** — tiling method, spacing, density
-3. **Style Constraints** — rendering, color usage, complexity
-4. **Tiling Technical** — edge alignment, seamless requirements
-5. **Avoid** — visual anti-patterns
+2. **Emotional & Personality Impact** — how the pattern feels (e.g. fun, clinical, calming), its psychological brand energy, and the vibe it creates
+3. **Grid System** — tiling method, spacing, density
+4. **Style Constraints** — rendering, color usage, complexity
+5. **Tiling Technical** — edge alignment, seamless requirements
+6. **Avoid** — visual anti-patterns
 
 Write ONLY the markdown content. No explanations, no preamble.
 Start with a YAML frontmatter block containing: name, type, version, generated_from.
@@ -265,7 +266,7 @@ def generate_style_guide(
         print(f"  Sending {loaded} images + analysis to Gemini...")
 
         # Model ladder for vision+text generation
-        _models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
+        _models = ["gemini-2.5-flash", "gemini-1.5-flash"]
         response = None
         for _m in _models:
             try:

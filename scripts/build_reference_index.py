@@ -63,20 +63,21 @@ Quality: consider originality, craft, scalability, and memorability.
 """
 
 PATTERN_PROMPT = """\
-You are a professional surface/textile design analyst. Analyze this pattern/texture image.
+You are a professional surface/textile design analyst and brand strategist. Analyze this pattern/texture image.
 
 Return ONLY a valid JSON object with EXACTLY these fields — no explanation, no markdown fences:
 
 {
-  "motif": "<describe the primary motif in 2-4 words, e.g. 'hexagonal grid', 'flowing curves', 'dot matrix'>",
-  "style": ["<2-4 from: geometric, organic, monoline, filled, 3d, minimal, detailed, flat, gradient, textured, sharp, rounded, hand-drawn, pixel, retro, modern, classic, brutalist, elegant, playful>"],
-  "technique": ["<1-3 from: negative space, grid construction, golden ratio, symmetry, asymmetry, optical illusion, line weight, counter forms, modularity, overlap, fragmentation, rotation>"],
+  "motif": "<describe the primary motif in 2-4 words, e.g. 'hexagonal grid', 'flowing curves'>",
+  "style": ["<2-4 from: geometric, organic, monoline, abstract, detailed, flat, gradient, textured, sharp, rounded, pixel, retro, modern, brutalist, elegant, playful>"],
+  "technique": ["<1-3 from: grid construction, symmetry, asymmetry, optical illusion, line weight, overlap, repetition, tessellation>"],
+  "mood": ["<3-6 visceral personality & emotional descriptors: e.g. fun, exciting, calm, chaotic, serene, energetic, sophisticated, mysterious, welcoming, aggressive, nostalgic, futuristic, clinical, warm>"],
   "industry": ["<1-3 from: tech, saas, fintech, crypto, web3, healthcare, ecommerce, education, real-estate, food, beverage, fashion, automotive, media, consulting, startup, enterprise, creative, nonprofit, gaming>"],
-  "mood": ["<2-4 from: confident, calm, bold, playful, serious, premium, accessible, warm, cold, edgy, trustworthy, innovative, elegant, minimal, powerful, friendly, mysterious, dynamic, stable, futuristic>"],
-  "colors": ["<1-3 from: monochrome, duo-tone, multi-color, gradient, dark, light, vibrant, muted, warm, cool, neutral, neon, pastel, earth-tone, metallic, high-contrast>"],
+  "colors": ["<1-3 from: monochrome, duo-tone, multi-color, gradient, dark, light, vibrant, muted, warm, cool, neutral, neon, pastel, earth-tone, metallic>"],
   "quality": <int 1-10: 6=ok, 7=professional, 8=very good, 9=excellent, 10=iconic>
 }
 
+CRITICAL: For the "mood" field, do NOT just describe the visual appearance. You must describe the PERSONALITY and EMOTIONAL IMPACT of the pattern. How does it make someone feel? What kind of brand energy does it project? (e.g. "fun", "calm", "exciting", "anxious", "luxurious", "playful").
 Quality: consider seamless tiling, visual rhythm, and professional execution.
 """
 
@@ -86,17 +87,15 @@ def _is_logos_type(ref_type: str) -> bool:
     return ref_type == "logos" or ref_type.startswith("logos/")
 
 
-def _tag_image(image_path: Path, ref_type: str, api_key: str) -> Optional[dict]:
+def _tag_image(client, image_path: Path, ref_type: str) -> Optional[dict]:
     """
     Send image to Gemini Vision for structured tagging.
     Tries model ladder; retries once on transient errors.
     Returns parsed dict or None.
     """
     try:
-        from google import genai
         from google.genai import types
 
-        client  = genai.Client(api_key=api_key)
         prompt  = LOGO_PROMPT if _is_logos_type(ref_type) else PATTERN_PROMPT
 
         img_bytes = image_path.read_bytes()
@@ -142,12 +141,14 @@ def _tag_image(image_path: Path, ref_type: str, api_key: str) -> Optional[dict]:
                 raw = raw[4:]
             raw = raw.strip()
 
-        tags = json.loads(raw)
-        tags["quality"] = max(1, min(10, int(tags.get("quality", 5))))
-        return tags
-
-    except json.JSONDecodeError as e:
-        print(f"    ⚠ JSON parse error for {image_path.name}: {e}")
+        import json_repair
+        tags = json_repair.loads(raw)
+        if hasattr(tags, "get") and isinstance(tags, dict):
+            tags["quality"] = max(1, min(10, int(tags.get("quality", 5))))
+            return tags
+        else:
+            print(f"    ⚠ Invalid JSON structure returned: {type(tags)}")
+            return None
         return None
     except Exception as e:
         raise   # propagate quota/rate errors to caller
@@ -221,6 +222,9 @@ def build_index(
     failed = 0
     quota_hit = False
 
+    from google import genai
+    client = genai.Client(api_key=api_key)
+
     for i, img_path in enumerate(to_tag, 1):
         print(f"  [{i}/{len(to_tag)}] {img_path.name}", end="  ", flush=True)
 
@@ -232,7 +236,7 @@ def build_index(
         tags = None
         for attempt in range(retries):
             try:
-                tags = _tag_image(img_path, ref_type, api_key)
+                tags = _tag_image(client, img_path, ref_type)
                 break
             except Exception as e:
                 err = str(e).lower()

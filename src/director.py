@@ -305,13 +305,21 @@ Propose a deliberate balance between market recognition and designer instinct. B
 **Option 4 — Wild Card**
 Surprise. Break from the brief's explicit direction. Use your understanding of the product, audience, and cultural moment to propose an unexpected direction that might be exactly right. No moodboard constraint.
 
-## THE CARDINAL RULE OF CONCEPT QUALITY
+## THE CARDINAL RULE OF CONCEPT QUALITY — ZERO TOLERANCE
 
 Before generating ANY visual spec, ask yourself: "Is this the first thing anyone would think of?"
-If yes — reject it and go deeper. The best logos do NOT show what the brand does. They show what it MEANS.
+If yes — REJECT IT IMMEDIATELY and go deeper. The best logos do NOT show what the brand does. They show what it MEANS.
 
-A coffee brand should never show a coffee bean. A tech brand should never show a circuit board.
-A finance brand should never show an arrow going up. These are visual clichés — design's equivalent of a dead metaphor.
+EXPLICIT BAN LIST — these are NEVER acceptable in ANY logo, for ANY brand:
+  ❌ Coffee brand → NO coffee bean, NO coffee cup, NO mug, NO steam, NO espresso drip, NO coffee plant
+  ❌ Tech brand → NO circuit board, NO binary, NO lightbulb, NO gear, NO rocket
+  ❌ Finance brand → NO upward arrow, NO chart, NO dollar sign, NO handshake, NO shield
+  ❌ Food brand → NO fork/spoon, NO chef hat, NO plate, NO fire/flame
+  ❌ Healthcare → NO red cross, NO heartbeat line, NO stethoscope, NO pill
+  ❌ Fashion → NO hanger, NO mannequin, NO scissors
+
+If any of these pictorial elements appear in your logo_spec.form field, YOUR OUTPUT IS REJECTED.
+Think metaphorically, abstractly, typographically — never literally.
 
 Each of the 4 directions MUST explore a different conceptual territory. The logo_concept field
 must begin with: "Conceptual territory: [name]. Rationale: [why this, not the obvious thing]."
@@ -319,6 +327,28 @@ must begin with: "Conceptual territory: [name]. Rationale: [why this, not the ob
 If the user brief includes CREATIVE CONSTRAINTS (anti-cliché list + lateral territories),
 those are HARD RULES. Violating them = rejected output. Use the lateral territory list as
 your creative starting point, then push one level deeper.
+
+## MANDATORY LOGO TYPE ALLOCATION — 4 DIRECTIONS
+
+You MUST follow these rules when choosing logo_type for each of the 4 directions:
+
+**Rule A — Proper Name Detection:**
+If the brand name is a PROPER NAME (a person's name like "Minh", "Elix", "Alex")
+or starts with a proper-name word (e.g. "Minh Coffee", "Elix Firm", "Clara Studio"):
+  ✅ ONE direction MUST use logo_type = "lettermark" → the FIRST LETTER of the brand name
+  ✅ ONE direction MUST use logo_type = "logotype" → the FULL brand name as pure typography, NO icon
+  ✅ The remaining 2 directions = symbol, abstract_mark, or combination (your choice)
+
+**Rule B — All Other Brand Names:**
+Even if the name is NOT a proper name (e.g. "Apex", "CloudBase", "Verdant"):
+  ✅ AT LEAST ONE direction MUST use logo_type = "logotype" → the brand name as pure typographic treatment, NO icon
+  ✅ The remaining 3 directions = any mix of symbol, abstract_mark, lettermark, combination
+
+**Rule B applies to ALL brands, including proper names (which already satisfy it via Rule A).**
+
+⚠ A "logotype" means the brand name IS the logo — typography only, no symbol, no icon beside it.
+   This is different from "combination" (which includes an icon + name).
+   Think: Google, Supreme, Coca-Cola, FedEx — pure type as identity.
 
 **For image specs — 3 structured JSON specs per direction:**
 
@@ -345,6 +375,9 @@ LOGO TYPE SELECTION — choose based on what fits the brand strategy:
 
   'lettermark' — when a single initial is enough to distinguish the brand.
     Use for: monogram-style identity, luxury/heritage positioning.
+    ⚠ LETTERMARK HARD RULE: The letter MUST be the FIRST LETTER of the brand name.
+       Brand name 'Minh Coffee' → letter MUST be 'M'. Brand name 'Apex' → letter MUST be 'A'.
+       ANY other letter = REJECTED OUTPUT. No exceptions.
     ⚠ Single letter only — avoid list MUST include "text", "words"
 
   'logotype' — when the brand NAME is the primary visual asset.

@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-pinterest_scraper.py — Selenium-based Pinterest board scraper with cookie injection.
+pinterest_scraper.py — Search-based Pinterest scraper using your logged-in account.
 
-Uses your existing Pinterest browser session. No email/password needed.
+Your account's search results are personalized to YOUR aesthetic taste.
+Uses Selenium + cookie injection (no password needed).
 
 SETUP (one-time):
   1. Install "Cookie-Editor" Chrome extension
-  2. Open pinterest.com in Chrome (make sure you're logged in)
-  3. Click Cookie-Editor → Export → "Export as JSON to Clipboard"
+  2. Open pinterest.com (logged in)
+  3. Cookie-Editor → Export → "Export as JSON to Clipboard"
   4. Run: pbpaste > references/pinterest_cookies.json
 
 Usage:
   python scripts/pinterest_scraper.py --all           # all 18 categories
-  python scripts/pinterest_scraper.py --preset style_minimal_geometric
-  python scripts/pinterest_scraper.py --list          # show all boards
+  python scripts/pinterest_scraper.py --preset style_luxury_premium
+  python scripts/pinterest_scraper.py --recrawl style_minimal_geometric  # delete + redo
 """
 
 from __future__ import annotations
@@ -25,17 +26,18 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List
+from urllib.parse import quote_plus
 
 try:
     import requests
     from PIL import Image
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.common.by import By
 except ImportError as e:
     print(f"Missing: {e}")
@@ -58,83 +60,152 @@ MIN_FILE_SIZE = 8_000
 MIN_DIMENSION = 300
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
-# ── Curated boards: 18 categories × 2 boards ──────────────────────────────────
-CATEGORY_BOARDS: Dict[str, List[str]] = {
+
+# ── Search queries per category ────────────────────────────────────────────────
+# These are used as Pinterest search queries — personalized by YOUR account
+CATEGORY_QUERIES: Dict[str, List[str]] = {
+    # Design Styles
     "style_minimal_geometric": [
-        "https://www.pinterest.com/2385kam/minimal-geometric-design/",
-        "https://www.pinterest.com/doorpostdesigns/design-minimal-%2B-modern-logos/",
+        "minimal geometric logo design",
+        "abstract symbol logo mark negative space",
+        "flat geometric brand identity logo",
     ],
     "style_corporate_enterprise": [
-        "https://www.pinterest.com/mineez012/corporate-logo-design/",
-        "https://www.pinterest.com/steffybangbang/corporate-logo-design/",
+        "corporate logo design professional enterprise",
+        "B2B brand identity logo minimalist",
+        "consulting firm logo design modern",
     ],
     "style_luxury_premium": [
-        "https://www.pinterest.com/Monroe_Creative/luxury-branding-logo-design/",
-        "https://www.pinterest.com/pinkbeedle/luxury-brand-logo/",
+        "luxury brand logo design premium elegant",
+        "high end fashion logo serif elegant",
+        "exclusive brand identity sophisticated",
     ],
     "style_tech_futuristic": [
-        "https://www.pinterest.com/an_gorski/futuristic-cyberpunk-tech-design/",
-        "https://www.pinterest.com/rumzzline/ai-tech-futuristic-logo/",
+        "tech logo design futuristic AI startup",
+        "futuristic brand identity abstract symbol",
+        "startup tech logo geometric digital",
     ],
     "style_organic_natural": [
-        "https://www.pinterest.com/wearezehn/coaching-logo-design-minimal-natural-organic/",
-        "https://www.pinterest.com/elliebstudio/natural-%2B-organic-branding/",
+        "organic logo design natural botanical",
+        "eco brand identity hand-drawn nature",
+        "sustainable brand logo leaf plant natural",
     ],
     "style_playful_mascot": [
-        "https://www.pinterest.com/ibasica/charactermascot-logo-and-illustration/",
-        "https://www.pinterest.com/ymursyidi/vector-mascot/",
+        "playful mascot logo character design brand",
+        "fun friendly mascot logo illustration",
+        "character logo cute bold colorful",
     ],
     "style_retro_vintage": [
-        "https://www.pinterest.com/jexsiam/retro-vintage-logo-design/",
-        "https://www.pinterest.com/e_suts/retrovintage-logos/",
+        "retro vintage logo design badge emblem",
+        "vintage brand logo classic typography",
+        "retro logo stamp distressed 70s 80s",
     ],
     "style_bold_brutalist": [
-        "https://www.pinterest.com/cdekoning0262/brutalist-logo/",
-        "https://www.pinterest.com/doatekin/brutalist-logo/",
+        "bold brutalist logo design heavy type",
+        "strong graphic logo bold geometric",
+        "impact wordmark logo heavy contrast brand",
     ],
     "style_elegant_editorial": [
-        "https://www.pinterest.com/wilddreamersstudio/logo-%2B-fonts/",
-        "https://www.pinterest.com/Tupeface_Trinity/elegant-serif-fonts/",
+        "elegant editorial logo design typography fashion",
+        "serif wordmark logo luxury fashion house",
+        "typographic logo editorial high fashion",
     ],
+    # Industries
     "industry_technology_saas": [
-        "https://www.pinterest.com/redwanmunna_d/technology-logo-design/",
-        "https://www.pinterest.com/faikarproject/technology-startup-modern-minimalist-logo-design/",
+        "technology SaaS logo design startup AI",
+        "software tech company logo modern abstract",
+        "AI startup brand identity minimal",
     ],
     "industry_finance_crypto": [
-        "https://www.pinterest.com/ppliu688/finance-logo-design-idea/",
-        "https://www.pinterest.com/AlZeleniuk/finance-logo-design/",
+        "fintech logo design finance banking brand",
+        "crypto blockchain logo web3 brand identity",
+        "investment fund logo premium financial",
     ],
     "industry_fashion_beauty": [
-        "https://www.pinterest.com/marimarkuletina/fashion-beauty-logo-ideas/",
-        "https://www.pinterest.com/sabinabasic419/fashion-logos-beauty-logo-ideas/",
+        "fashion brand logo design luxury beauty",
+        "beauty cosmetics logo minimal elegant brand",
+        "lifestyle brand logo script serif",
     ],
     "industry_food_beverage": [
-        "https://www.pinterest.com/de_putera/coffee-logo-design/",
-        "https://www.pinterest.com/de_putera/beans-coffee-logo-design/",
+        "food beverage brand logo restaurant design",
+        "coffee shop cafe logo minimal modern",
+        "hospitality hotel restaurant brand logo",
     ],
     "industry_media_gaming": [
-        "https://www.pinterest.com/Alvazama/esport-logo-design/",
-        "https://www.pinterest.com/thetoywonder/design-logo-sportesport/",
+        "media entertainment logo design bold dynamic",
+        "gaming esports logo design bold modern",
+        "podcast streaming media brand identity logo",
     ],
     "industry_real_estate": [
-        "https://www.pinterest.com/paulreiss/identity-for-real-estate-architecture/",
-        "https://www.pinterest.com/branddealer/real-estate-branding/",
+        "real estate logo design architecture brand",
+        "property development brand identity logo minimal",
+        "architecture firm logo geometric abstract",
     ],
     "industry_healthcare_wellness": [
-        "https://www.pinterest.com/Sayemhajari/30-best-healthcaremedical-logo-designdesigner/",
-        "https://www.pinterest.com/cwillisandco/holistic-wellness-branding/",
+        "healthcare wellness logo design medical brand",
+        "health wellness app logo minimal clean",
+        "mental health wellness brand identity logo",
     ],
     "industry_education_edtech": [
-        "https://www.pinterest.com/withfaithandlovedesign/branding-design-education-with-faith-love/",
-        "https://www.pinterest.com/digitalmarketingalexa/education-institute-branding-logo-inspiration/",
+        "education brand logo edtech learning design",
+        "online learning platform logo modern minimal",
+        "educational institution logo design clean",
     ],
     "industry_retail_ecommerce": [
-        "https://www.pinterest.com/quixoticdesignco/editorial-luxe-logo-design-inspo/",
-        "https://www.pinterest.com/brandcrowd/shop-logos/",
+        "retail ecommerce logo brand identity design",
+        "online store shopping brand logo minimal",
+        "D2C brand logo modern consumer direct",
+    ],
+
+    # Patterns
+    "pattern_geometric_repeat": [
+        "geometric repeat seamless pattern design",
+        "abstract geometric brand pattern tileable",
+        "simple shape grid pattern minimal",
+    ],
+    "pattern_organic_fluid": [
+        "organic fluid seamless pattern design",
+        "flowing lines brand pattern waves",
+        "soft organic shape background tileable",
+    ],
+    "pattern_abstract_gradient_mesh": [
+        "abstract gradient mesh brand background",
+        "soft blurred gradient mesh design tileable",
+        "colorful fluid gradient background pattern",
+    ],
+    "pattern_line_art_monoline": [
+        "line art monoline seamless pattern design",
+        "thin line grid pattern sophisticated tileable",
+        "minimalist line art brand pattern tile",
+    ],
+    "pattern_icon_based_repeating": [
+        "icon based repeating seamless pattern",
+        "pictogram brand pattern tileable",
+        "small symbol repeating background pattern",
+    ],
+    "pattern_textile_inspired": [
+        "textile inspired seamless pattern design",
+        "fabric weave texture background brand",
+        "woven textile brand pattern tileable",
+    ],
+    "pattern_tech_grid_circuit": [
+        "tech grid circuit seamless pattern design",
+        "cyber technology background pattern",
+        "digital grid tech pattern tileable",
+    ],
+    "pattern_memphis_playful": [
+        "memphis playful seamless pattern design",
+        "colorful 80s memphis brand pattern",
+        "bold fun pop art texture graphic",
+    ],
+    "pattern_cultural_heritage": [
+        "cultural heritage inspired seamless pattern",
+        "traditional folk art brand pattern tileable",
+        "heritage motif repeating pattern background",
     ],
 }
 
-ALL_CATEGORIES = list(CATEGORY_BOARDS.keys())
+ALL_CATEGORIES = list(CATEGORY_QUERIES.keys())
 
 
 # ── Cookies ────────────────────────────────────────────────────────────────────
@@ -142,30 +213,22 @@ ALL_CATEGORIES = list(CATEGORY_BOARDS.keys())
 def load_cookies(cookies_file: Path) -> dict:
     if not cookies_file.exists():
         print(f"\n  ✗ Cookie file not found: {cookies_file}")
-        print("\n  HOW TO EXPORT COOKIES:")
-        print("  1. Install Cookie-Editor Chrome extension")
-        print("  2. Open pinterest.com (logged in with Facebook or any method)")
-        print("  3. Click Cookie-Editor → Export → 'Export as JSON to Clipboard'")
-        print(f"  4. Run: pbpaste > {cookies_file}")
+        print("  Run: pbpaste > references/pinterest_cookies.json")
+        print("  (after doing Export → Copy to Clipboard in Cookie-Editor)")
         sys.exit(1)
 
     raw = json.loads(cookies_file.read_text())
-    if isinstance(raw, list):
-        cookies = {c["name"]: c["value"] for c in raw if "name" in c}
-    else:
-        cookies = raw
+    cookies = {c["name"]: c["value"] for c in raw if "name" in c} \
+              if isinstance(raw, list) else raw
 
-    if "_auth" in cookies:
-        print(f"  ✓ Authenticated ({len(cookies)} cookies loaded)")
-    else:
-        print(f"  ⚠ {len(cookies)} cookies loaded (no _auth cookie — may not be logged in)")
+    status = "✓ Authenticated" if "_auth" in cookies else "⚠ No _auth cookie"
+    print(f"  {status} ({len(cookies)} cookies)")
     return cookies
 
 
 # ── Selenium driver ────────────────────────────────────────────────────────────
 
 def create_driver(headless: bool = True) -> webdriver.Chrome:
-    """Create Chrome driver using webdriver-manager (auto-installs ChromeDriver)."""
     from webdriver_manager.chrome import ChromeDriverManager
     opts = Options()
     if headless:
@@ -180,13 +243,11 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
         "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
     )
-    # Selenium v3 uses executable_path, v4+ uses Service
     chromedriver_path = ChromeDriverManager().install()
     try:
         from selenium.webdriver.chrome.service import Service
         driver = webdriver.Chrome(service=Service(chromedriver_path), options=opts)
     except TypeError:
-        # Selenium v3 fallback
         driver = webdriver.Chrome(executable_path=chromedriver_path, options=opts)
 
     driver.execute_script(
@@ -196,38 +257,39 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
 
 
 def inject_cookies(driver: webdriver.Chrome, cookies: dict) -> None:
-    """Inject Pinterest session cookies. Must navigate to site first."""
     driver.get("https://www.pinterest.com")
     time.sleep(2)
     driver.delete_all_cookies()
     for name, value in cookies.items():
         try:
             driver.add_cookie({
-                "name": name,
-                "value": value,
-                "domain": ".pinterest.com",
-                "path": "/",
+                "name": name, "value": value,
+                "domain": ".pinterest.com", "path": "/",
             })
         except Exception:
             pass
-    # Reload with cookies
     driver.get("https://www.pinterest.com")
     time.sleep(2)
-    print("  ✓ Cookies injected into browser")
+    print("  ✓ Session injected into browser")
 
 
-# ── Board scraper ──────────────────────────────────────────────────────────────
+# ── Pinterest search scraper ───────────────────────────────────────────────────
 
-def scrape_board(driver: webdriver.Chrome, board_url: str, max_imgs: int = 60) -> List[str]:
+def search_and_scrape(
+    driver: webdriver.Chrome,
+    query: str,
+    max_imgs: int = 60,
+) -> List[str]:
     """
-    Navigate to a Pinterest board, scroll to load images, return unique pinimg URLs.
-    Uses JS extraction to avoid StaleElementReferenceException.
+    Run a Pinterest search query with the logged-in account,
+    scroll to load results, extract image URLs.
     """
-    print(f"    → {board_url}")
-    driver.get(board_url)
+    search_url = f"https://www.pinterest.com/search/pins/?q={quote_plus(query)}"
+    print(f"    🔍 '{query}'")
+    driver.get(search_url)
     time.sleep(3)
 
-    if "login" in driver.current_url or "accounts" in driver.current_url:
+    if "login" in driver.current_url:
         print("    ⚠ Redirected to login — cookies expired")
         return []
 
@@ -235,51 +297,57 @@ def scrape_board(driver: webdriver.Chrome, board_url: str, max_imgs: int = 60) -
     last_height = 0
     no_change = 0
 
-    for _ in range(25):
-        # Extract all pinimg URLs via JS (atomic, stale-safe)
-        urls_js: list = driver.execute_script("""
-            var imgs = document.querySelectorAll('img[src*="pinimg.com"]');
-            var urls = [];
-            for (var i = 0; i < imgs.length; i++) {
-                var src = imgs[i].src || imgs[i].getAttribute('src') || '';
-                if (src && (src.endsWith('.jpg') || src.endsWith('.png') || src.endsWith('.webp'))) {
-                    urls.push(src);
+    for _ in range(20):
+        try:
+            # JS-based extraction (stale-element safe)
+            urls_js: list = driver.execute_script("""
+                var imgs = document.querySelectorAll('img[src*="pinimg.com"]');
+                var urls = [];
+                for (var i = 0; i < imgs.length; i++) {
+                    var src = imgs[i].src || imgs[i].getAttribute('src') || '';
+                    if (src && (src.endsWith('.jpg') || src.endsWith('.png') || src.endsWith('.webp'))) {
+                        urls.push(src);
+                    }
                 }
-            }
-            return urls;
-        """) or []
+                return urls;
+            """) or []
 
-        for src in urls_js:
-            src = re.sub(r"/(?:236x|474x|564x)/", "/736x/", src)
-            found.add(src)
+            for src in urls_js:
+                src = re.sub(r"/(?:236x|474x|564x)/", "/736x/", src)
+                found.add(src)
 
-        if len(found) >= max_imgs:
-            break
-
-        driver.execute_script("window.scrollBy(0, 900);")
-        time.sleep(random.uniform(1.2, 2.2))
-
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            no_change += 1
-            if no_change >= 4:
+            if len(found) >= max_imgs:
                 break
-        else:
-            no_change = 0
-        last_height = new_height
 
-    urls = list(found)[:max_imgs]
-    print(f"    Found {len(urls)} images")
-    return urls
+            driver.execute_script("window.scrollBy(0, 900);")
+            time.sleep(random.uniform(1.2, 2.0))
+
+            new_height = driver.execute_script(
+                "return document.body ? document.body.scrollHeight : 0"
+            ) or 0
+            if new_height == last_height:
+                no_change += 1
+                if no_change >= 4:
+                    break
+            else:
+                no_change = 0
+            last_height = new_height
+
+        except Exception:
+            time.sleep(2)
+            continue
+
+    return list(found)[:max_imgs]
 
 
-# ── Download & filter ──────────────────────────────────────────────────────────
+# ── Download & quality filter ──────────────────────────────────────────────────
 
 def download_image(url: str, target_dir: Path, existing_hashes: set) -> bool:
-    """Download, quality-filter, dedup, and save one image."""
     try:
-        resp = requests.get(url, timeout=15,
-                            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.pinterest.com"})
+        resp = requests.get(url, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.pinterest.com",
+        })
         resp.raise_for_status()
         content = resp.content
 
@@ -310,64 +378,96 @@ def download_image(url: str, target_dir: Path, existing_hashes: set) -> bool:
 
 # ── Category crawl ─────────────────────────────────────────────────────────────
 
-def crawl_category(driver: webdriver.Chrome, category: str, boards: List[str], target: int = 25) -> dict:
-    target_dir = REFERENCES_DIR / "logos" / category
+def crawl_category(
+    driver: webdriver.Chrome,
+    category: str,
+    queries: List[str],
+    target: int = 25,
+    force: bool = False,
+) -> dict:
+    folder_type = "logos"
+    if category.startswith("pattern_"):
+        folder_type = "patterns"
+    elif category.startswith("design_system_"):
+        folder_type = "design_systems"
+
+    target_dir = REFERENCES_DIR / folder_type / category
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_hashes = {f.stem[:16] for f in target_dir.iterdir() if f.suffix.lower() in IMAGE_EXTS}
+    if force and target_dir.exists():
+        print(f"  ♻ Deleting existing images for re-crawl...")
+        for f in target_dir.iterdir():
+            if f.suffix.lower() in IMAGE_EXTS:
+                f.unlink()
+
+    existing_hashes = {f.stem[:16] for f in target_dir.iterdir()
+                       if f.suffix.lower() in IMAGE_EXTS}
     already = len(existing_hashes)
     need = max(0, target - already)
 
     if need == 0:
-        print(f"  ✓ Already {already} images — skipping")
+        print(f"  ✓ Already {already} images — skipping (use --recrawl to redo)")
         return {"kept": 0, "total": already}
 
     print(f"  Need {need} more (have {already})")
     kept = 0
+    per_query = max(60, need * 3 // len(queries))
 
-    for board_url in boards:
+    for query in queries:
         if kept >= need:
             break
-        urls = scrape_board(driver, board_url, max_imgs=max(60, need * 3))
+        urls = search_and_scrape(driver, query, max_imgs=per_query)
+        print(f"    → {len(urls)} images found")
         for url in urls:
             if kept >= need:
                 break
             if download_image(url, target_dir, existing_hashes):
                 kept += 1
-        print(f"  Kept so far: {kept}/{need}")
-        time.sleep(random.uniform(2, 4))
+
+        time.sleep(random.uniform(1.5, 3.0))
 
     total = sum(1 for f in target_dir.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    print(f"  → Kept {kept} new, total {total} images")
     return {"kept": kept, "total": total}
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Pinterest board scraper for brand references")
+    parser = argparse.ArgumentParser(
+        description="Pinterest search scraper — uses YOUR account's personalized results"
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--all", action="store_true", help="Crawl all 18 categories")
     group.add_argument("--preset", choices=ALL_CATEGORIES, metavar="CATEGORY",
                        help="Crawl a single category")
-    group.add_argument("--list", action="store_true", help="List all categories and board URLs")
+    group.add_argument("--recrawl", choices=ALL_CATEGORIES, metavar="CATEGORY",
+                       help="Delete existing images and re-crawl a category")
+    group.add_argument("--list", action="store_true", help="List all categories and queries")
     parser.add_argument("--count", type=int, default=25, help="Target images per category")
     parser.add_argument("--cookies", type=str, default=str(COOKIES_FILE))
-    parser.add_argument("--show-browser", action="store_true",
-                        help="Show Chrome window (instead of headless)")
+    parser.add_argument("--show-browser", action="store_true", help="Show Chrome window")
     args = parser.parse_args()
 
     if args.list:
-        for cat, boards in CATEGORY_BOARDS.items():
+        for cat, queries in CATEGORY_QUERIES.items():
             print(f"\n{cat}:")
-            for b in boards:
-                print(f"  {b}")
+            for q in queries:
+                print(f"  → \"{q}\"")
         return
 
     cookies = load_cookies(Path(args.cookies))
 
-    categories = ALL_CATEGORIES if getattr(args, "all", False) else \
-                 ([args.preset] if args.preset else None)
-    if not categories:
+    if args.recrawl:
+        categories = [args.recrawl]
+        force = True
+    elif getattr(args, "all", False):
+        categories = ALL_CATEGORIES
+        force = False
+    elif args.preset:
+        categories = [args.preset]
+        force = False
+    else:
         parser.print_help()
         return
 
@@ -382,7 +482,11 @@ def main():
             print(f"\n{'='*60}")
             print(f"  [{i}/{len(categories)}] {cat}")
             print(f"{'='*60}")
-            stats = crawl_category(driver, cat, CATEGORY_BOARDS[cat], target=args.count)
+            stats = crawl_category(
+                driver, cat, CATEGORY_QUERIES[cat],
+                target=args.count,
+                force=(force if args.recrawl else False),
+            )
             grand_total += stats["kept"]
             if i < len(categories):
                 time.sleep(random.uniform(2, 4))
@@ -390,11 +494,13 @@ def main():
     finally:
         driver.quit()
 
-    print(f"\n✓ Done: {grand_total} new images across {len(categories)} categories")
-    print("  Folder: references/logos/")
-    print("  Next:   review images, then run:")
-    print("          python scripts/build_reference_index.py")
-    print("          python scripts/generate_style_guide.py")
+    print(f"\n{'='*60}")
+    print(f"  ✓ Done: {grand_total} new images across {len(categories)} categories")
+    print(f"  Folder: references/logos/")
+    print(f"\n  Next steps:")
+    print(f"  1. Review images in Finder → delete bad ones")
+    print(f"  2. python scripts/build_reference_index.py")
+    print(f"  3. python scripts/generate_style_guide.py")
 
 
 if __name__ == "__main__":
