@@ -1534,7 +1534,7 @@ def _ai_reconstruct_mockup(
         return None
 
     try:
-        client   = genai.Client(api_key=api_key)
+        client   = genai.Client(api_key=api_key, http_options={"timeout": 90})
         mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                     ".png": "image/png",  ".webp": "image/webp"}
 
@@ -1816,10 +1816,12 @@ def composite_all_mockups(
         fail_count = 0
         brand_name = getattr(assets, "brand_name", "") or assets.direction.direction_name
 
-        console.print(f"\n  Option {num} — AI compositing {len(processed_files)} mockup(s)…")
+        total_mp = len(processed_files)
+        console.print(f"\n  Option {num} — AI compositing {total_mp} mockup(s)…")
 
-        for mp in processed_files:
+        for mp_idx, mp in enumerate(processed_files, 1):
             out_path = mockup_dir / (mp.stem + "_composite.png")
+            console.print(f"    → [{mp_idx}/{total_mp}] {mp.stem}…", end=" ")
             try:
                 # ── Step 1: Extract zones programmatically (Pillow only) ───────
                 zones     = _extract_zones(mp)
@@ -1863,18 +1865,15 @@ def composite_all_mockups(
                     out_path.write_bytes(ai_bytes)
                     composited.append(out_path)
                     console.print(
-                        f"    [green]✓ AI[/green] {mp.name}"
-                        f"  [dim]zones:{n_zones}  orig:{original_path.name}[/dim]"
+                        f"[green]✓[/green]  [dim]zones:{n_zones}  orig:{original_path.name}[/dim]"
                     )
                     ok_count += 1
                 else:
-                    console.print(
-                        f"    [yellow]⚠ {mp.name}: all {MAX_ATTEMPTS} attempts failed — skipped[/yellow]"
-                    )
+                    console.print(f"[yellow]⚠ all {MAX_ATTEMPTS} attempts failed — skipped[/yellow]")
                     fail_count += 1
 
             except Exception as exc:
-                console.print(f"    [yellow]⚠ {mp.name}: {exc}[/yellow]")
+                console.print(f"[yellow]✗ ERROR: {exc}[/yellow]")
                 fail_count += 1
 
         results[num] = composited
