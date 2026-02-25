@@ -315,8 +315,8 @@ def main() -> None:
         description="Auto-label reference images using Gemini Vision"
     )
     parser.add_argument(
-        "--type", choices=["logos", "patterns"],
-        help="Process only this reference type (default: both)",
+        "--type", type=str,
+        help="Reference type or category path, e.g. logos, patterns, logos/style_minimal_geometric",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -338,7 +338,27 @@ def main() -> None:
         print("  export GEMINI_API_KEY=your-key-here")
         sys.exit(1)
 
-    types_to_process = [args.type] if args.type else ["logos", "patterns"]
+    if args.type:
+        types_to_process = [args.type]
+    else:
+        # Auto-discover: logos, patterns, and all logos/category subdirs
+        types_to_process = []
+        for top in ["logos", "patterns"]:
+            top_dir = REFERENCES_DIR / top
+            if not top_dir.exists():
+                continue
+            # Check if top dir itself has images
+            has_images = any(
+                p.suffix.lower() in IMAGE_EXTS
+                for p in top_dir.iterdir()
+                if not p.name.startswith(".")
+            )
+            if has_images:
+                types_to_process.append(top)
+            # Check subdirs (categories)
+            for sub in sorted(top_dir.iterdir()):
+                if sub.is_dir() and not sub.name.startswith("."):
+                    types_to_process.append(f"{top}/{sub.name}")
 
     for ref_type in types_to_process:
         ref_dir = REFERENCES_DIR / ref_type

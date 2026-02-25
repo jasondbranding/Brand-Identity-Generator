@@ -69,40 +69,104 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 # These are design-focused queries that produce high-quality reference images
 
 PRESET_QUERIES: Dict[str, List[dict]] = {
-    "logos": [
-        # By style
-        {"query": "minimal geometric logo design",          "pages": 5},
-        {"query": "abstract symbol logo mark",              "pages": 5},
-        {"query": "monoline logo design branding",          "pages": 3},
-        {"query": "negative space logo clever",             "pages": 3},
-        {"query": "lettermark monogram logo",               "pages": 3},
-        {"query": "flat vector logo icon modern",           "pages": 3},
-        # By industry
-        {"query": "fintech crypto logo design",             "pages": 3},
-        {"query": "saas tech startup logo branding",        "pages": 3},
-        {"query": "luxury premium brand identity logo",     "pages": 3},
-        {"query": "healthcare medical logo minimal",        "pages": 2},
-        {"query": "food beverage brand logo design",        "pages": 2},
-        {"query": "fashion brand identity logo",            "pages": 2},
-        # By mood
-        {"query": "bold confident logo design",             "pages": 2},
-        {"query": "elegant sophisticated logo mark",        "pages": 2},
-        {"query": "playful friendly logo design",           "pages": 2},
+
+    # ── DESIGN STYLES ──────────────────────────────────────────────────────────
+
+    "style_minimal_geometric": [
+        {"query": "minimal geometric logo design vector 2024",         "pages": 3},
+        {"query": "clean abstract symbol logo mark negative space",    "pages": 3},
+        {"query": "flat geometric brand identity logo professional",   "pages": 2},
     ],
-    "patterns": [
-        # By motif
-        {"query": "geometric seamless pattern design",      "pages": 5},
-        {"query": "minimal line pattern surface design",    "pages": 3},
-        {"query": "abstract organic pattern texture",       "pages": 3},
-        {"query": "hexagonal grid pattern modern",          "pages": 3},
-        {"query": "dot grid pattern minimal",               "pages": 3},
-        # By style
-        {"query": "brand pattern identity system",          "pages": 3},
-        {"query": "art deco pattern design",                "pages": 2},
-        {"query": "isometric pattern vector",               "pages": 2},
-        {"query": "textile surface pattern professional",   "pages": 3},
+    "style_corporate_enterprise": [
+        {"query": "corporate logo design professional enterprise",      "pages": 3},
+        {"query": "B2B brand identity logo minimalist serious",         "pages": 3},
+        {"query": "consulting firm logo design modern",                 "pages": 2},
+    ],
+    "style_luxury_premium": [
+        {"query": "luxury brand logo design premium elegant",           "pages": 3},
+        {"query": "high-end fashion logo mark serif gold",              "pages": 3},
+        {"query": "exclusive brand identity logo sophisticated",        "pages": 2},
+    ],
+    "style_tech_futuristic": [
+        {"query": "tech logo design futuristic modern AI",              "pages": 3},
+        {"query": "futuristic brand identity logo abstract symbol",     "pages": 3},
+        {"query": "startup tech logo geometric digital innovation",     "pages": 2},
+    ],
+    "style_organic_natural": [
+        {"query": "organic logo design natural botanical",              "pages": 3},
+        {"query": "eco brand identity logo hand-drawn nature",          "pages": 3},
+        {"query": "sustainable brand logo leaf plant natural",          "pages": 2},
+    ],
+    "style_playful_mascot": [
+        {"query": "playful mascot logo character design brand",         "pages": 3},
+        {"query": "fun friendly mascot logo illustration",              "pages": 3},
+        {"query": "character logo design cute bold colorful",           "pages": 2},
+    ],
+    "style_retro_vintage": [
+        {"query": "retro vintage logo design badge emblem",             "pages": 3},
+        {"query": "vintage brand identity logo classic typography",     "pages": 3},
+        {"query": "retro logo stamp distressed 70s 80s style",         "pages": 2},
+    ],
+    "style_bold_brutalist": [
+        {"query": "bold brutalist logo design heavy type",              "pages": 3},
+        {"query": "strong graphic logo design bold geometric",          "pages": 3},
+        {"query": "impact wordmark logo heavy contrast brand identity", "pages": 2},
+    ],
+    "style_elegant_editorial": [
+        {"query": "elegant editorial logo design fashion typography",   "pages": 3},
+        {"query": "serif wordmark logo design luxury fashion house",    "pages": 3},
+        {"query": "typographic logo design editorial high fashion",     "pages": 2},
+    ],
+
+    # ── INDUSTRIES ─────────────────────────────────────────────────────────────
+
+    "industry_technology_saas": [
+        {"query": "technology SaaS logo design startup AI brand",       "pages": 3},
+        {"query": "software tech company logo modern abstract",         "pages": 3},
+        {"query": "AI startup brand identity logo minimal",             "pages": 2},
+    ],
+    "industry_finance_crypto": [
+        {"query": "fintech logo design finance banking brand",          "pages": 3},
+        {"query": "crypto blockchain logo design web3 brand identity",  "pages": 3},
+        {"query": "investment fund logo premium financial brand",       "pages": 2},
+    ],
+    "industry_fashion_beauty": [
+        {"query": "fashion brand logo design luxury beauty",           "pages": 3},
+        {"query": "beauty cosmetics logo minimal elegant brand",        "pages": 3},
+        {"query": "lifestyle brand identity logo script serif",         "pages": 2},
+    ],
+    "industry_food_beverage": [
+        {"query": "food beverage brand logo design restaurant",         "pages": 3},
+        {"query": "coffee shop cafe logo design minimal",               "pages": 3},
+        {"query": "hospitality hotel restaurant brand identity logo",   "pages": 2},
+    ],
+    "industry_media_gaming": [
+        {"query": "media entertainment logo design bold dynamic",       "pages": 3},
+        {"query": "gaming esports logo design bold modern",             "pages": 3},
+        {"query": "podcast streaming media brand identity logo",        "pages": 2},
+    ],
+    "industry_real_estate": [
+        {"query": "real estate logo design architecture brand",         "pages": 3},
+        {"query": "property development brand identity logo minimal",   "pages": 3},
+        {"query": "architecture firm logo geometric abstract",          "pages": 2},
+    ],
+    "industry_healthcare_wellness": [
+        {"query": "healthcare wellness logo design medical brand",      "pages": 3},
+        {"query": "health wellness app logo minimal clean",             "pages": 3},
+        {"query": "mental health wellness brand identity logo",         "pages": 2},
+    ],
+    "industry_education_edtech": [
+        {"query": "education brand logo design edtech learning",        "pages": 3},
+        {"query": "online learning platform logo modern minimal",       "pages": 3},
+        {"query": "educational institution logo design clean",          "pages": 2},
+    ],
+    "industry_retail_ecommerce": [
+        {"query": "retail ecommerce logo design brand identity",        "pages": 3},
+        {"query": "online store shopping brand logo minimal bold",      "pages": 3},
+        {"query": "D2C brand identity logo modern consumer",            "pages": 2},
     ],
 }
+
 
 
 # ── Crawler integration ──────────────────────────────────────────────────────
@@ -354,14 +418,29 @@ def run_pipeline(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+ALL_CATEGORIES = list(PRESET_QUERIES.keys())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Crawl Pinterest for brand references, then auto-tag with Gemini Vision"
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
-        "--preset", choices=["logos", "patterns"],
-        help="Use curated search queries for logos or patterns",
+        "--preset", choices=ALL_CATEGORIES,
+        metavar="CATEGORY",
+        help=(
+            "Category to crawl. Styles: style_minimal_geometric, style_corporate_enterprise, "
+            "style_luxury_premium, style_tech_futuristic, style_organic_natural, "
+            "style_playful_mascot, style_retro_vintage, style_bold_brutalist, style_elegant_editorial. "
+            "Industries: industry_technology_saas, industry_finance_crypto, industry_fashion_beauty, "
+            "industry_food_beverage, industry_media_gaming, industry_real_estate, "
+            "industry_healthcare_wellness, industry_education_edtech, industry_retail_ecommerce"
+        ),
+    )
+    group.add_argument(
+        "--all", action="store_true",
+        help="Crawl ALL 18 categories (runs sequentially, takes ~30-60 min)",
     )
     group.add_argument(
         "--query", type=str,
@@ -378,11 +457,11 @@ def main() -> None:
 
     parser.add_argument(
         "--type", choices=["logos", "patterns"], default="logos",
-        help="Reference type (default: logos)",
+        help="Reference type for custom query (default: logos)",
     )
     parser.add_argument(
-        "--pages", type=int, default=5,
-        help="Number of scroll pages to crawl (default: 5)",
+        "--pages", type=int, default=3,
+        help="Number of scroll pages for custom query (default: 3)",
     )
     parser.add_argument(
         "--email", type=str, default=os.environ.get("PINTEREST_EMAIL"),
@@ -398,43 +477,58 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if not args.email or not args.password:
+        print("\n  ⚠ Pinterest credentials not set — set PINTEREST_EMAIL / PINTEREST_PASSWORD in .env")
+
     # Tag-only mode
     if args.tag_only:
         run_auto_tag(args.type)
         return
 
-    # Build query list
-    if args.preset:
-        queries = PRESET_QUERIES[args.preset]
-        ref_type = args.preset
-    elif args.query:
-        queries = [{"query": args.query, "pages": args.pages}]
-        ref_type = args.type
-    elif args.url:
-        queries = [{"url": args.url, "pages": args.pages}]
-        ref_type = args.type
+    # Determine which categories to run
+    if getattr(args, "all", False):
+        categories = ALL_CATEGORIES
+    elif args.preset:
+        categories = [args.preset]
+    elif args.query or args.url:
+        # Custom one-off crawl to a user-specified subfolder
+        queries = [{"query": args.query, "pages": args.pages}] if args.query else \
+                  [{"url": args.url, "pages": args.pages}]
+        run_pipeline(
+            queries=queries,
+            ref_type=args.type,
+            email=args.email,
+            password=args.password,
+            skip_tag=args.skip_tag,
+        )
+        return
     else:
         parser.print_help()
         return
 
-    print(f"\n  Pinterest Crawler → {ref_type}")
-    print(f"  Queries: {len(queries)}")
-    print(f"  Target: references/{ref_type}/")
+    total = len(categories)
+    for i, cat in enumerate(categories, 1):
+        queries = PRESET_QUERIES[cat]
+        # Each category gets its own subfolder under references/logos/
+        ref_type = f"logos/{cat}"
 
-    if not args.email or not args.password:
-        print("\n  ⚠ Pinterest credentials not set!")
-        print("    Either pass --email/--password or set in .env:")
-        print("    PINTEREST_EMAIL=your@email.com")
-        print("    PINTEREST_PASSWORD=your_password")
-        print("\n    Crawler may still work for public boards without login.")
+        print(f"\n{'#'*60}")
+        print(f"  [{i}/{total}] Category: {cat}")
+        print(f"  Target:   references/{ref_type}/")
+        print(f"  Queries:  {len(queries)}")
+        print(f"{'#'*60}")
 
-    run_pipeline(
-        queries=queries,
-        ref_type=ref_type,
-        email=args.email,
-        password=args.password,
-        skip_tag=args.skip_tag,
-    )
+        run_pipeline(
+            queries=queries,
+            ref_type=ref_type,
+            email=args.email,
+            password=args.password,
+            skip_tag=args.skip_tag,
+        )
+
+    print(f"\n✓ Crawled {total} categories → references/logos/{{category}}/")
+    print("  Review images, delete bad ones, then run:")
+    print("  python scripts/build_reference_library.py --skip-crawl --type logos")
 
 
 if __name__ == "__main__":

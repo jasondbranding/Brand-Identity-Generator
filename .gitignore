@@ -7,3 +7,8 @@ outputs/
 *.egg-info/
 .venv/
 venv/
+references/pinterest_cookies.json
+tools/Pinterest-infinite-crawler/
+
+# Backup folders
+mockups/originals/_backup/

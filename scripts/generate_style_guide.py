@@ -279,8 +279,8 @@ def main() -> None:
         description="Auto-generate style.md from tagged reference images"
     )
     parser.add_argument(
-        "--type", choices=["logos", "patterns"],
-        help="Generate for specific type (default: all available)",
+        "--type", type=str,
+        help="Reference type or category path, e.g. logos, patterns, logos/style_minimal_geometric",
     )
     parser.add_argument(
         "--output", type=str,
@@ -300,7 +300,26 @@ def main() -> None:
     output_dir = Path(args.output) if args.output else DEFAULT_OUTPUT
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    types_to_process = [args.type] if args.type else ["logos", "patterns"]
+    if args.type:
+        types_to_process = [args.type]
+    else:
+        # Auto-discover: logos, patterns, and all category subdirs
+        types_to_process = []
+        for top in ["logos", "patterns"]:
+            top_dir = REFERENCES_DIR / top
+            if not top_dir.exists():
+                continue
+            has_images = any(
+                p.suffix.lower() in {'.png','.jpg','.jpeg','.webp'}
+                for p in top_dir.iterdir()
+                if not p.name.startswith(".")
+            )
+            if has_images:
+                types_to_process.append(top)
+            for sub in sorted(top_dir.iterdir()):
+                if sub.is_dir() and not sub.name.startswith(".") and \
+                   any(f.suffix.lower() in {'.png','.jpg','.jpeg','.webp'} for f in sub.iterdir()):
+                    types_to_process.append(f"{top}/{sub.name}")
 
     for ref_type in types_to_process:
         print(f"\n{'='*60}")
@@ -310,7 +329,9 @@ def main() -> None:
         content = generate_style_guide(ref_type, api_key, top_n=args.top)
 
         if content:
-            out_path = output_dir / f"{ref_type}_style.md"
+            # Use leaf name for output: logos/style_minimal_geometric → style_minimal_geometric
+            leaf = Path(ref_type).name
+            out_path = output_dir / f"{leaf}_style.md"
             out_path.write_text(content, encoding="utf-8")
             print(f"\n  ✓ Saved → {out_path}")
             print(f"  Length: {len(content)} chars, {content.count(chr(10))} lines")
