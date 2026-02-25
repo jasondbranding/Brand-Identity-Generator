@@ -69,6 +69,7 @@ def generate_all_assets(
     brief_text: str = "",
     moodboard_images: Optional[list] = None,
     style_ref_images: Optional[list] = None,
+    logo_only: bool = False,
 ) -> dict:
     """
     Generate bg + logo + pattern for every direction.
@@ -86,8 +87,8 @@ def generate_all_assets(
                                  Injected into logo/pattern generation as highest-priority refs
         style_ref_images:        User-chosen reference images as STYLE ANCHOR — ALL logos
                                  must match the visual rendering style of these images.
-                                 Different from moodboard: these lock the render aesthetic
-                                 (flat/hand-drawn/geometric) across all 4 directions.
+        logo_only:               If True, generate ONLY logo.png — skip background, pattern,
+                                 palette fetch, and shade scales. Used for Phase 1 (fast preview).
 
     Returns:
         Dict mapping option_number → DirectionAssets
@@ -99,6 +100,7 @@ def generate_all_assets(
         console.print(
             f"\n[bold cyan]→ Generating assets for Option {direction.option_number}: "
             f"{direction.direction_name}[/bold cyan]"
+            + (" [logo only]" if logo_only else "")
         )
         assets = _generate_direction_assets(
             direction, output_dir,
@@ -110,6 +112,7 @@ def generate_all_assets(
             brief_text=brief_text,
             moodboard_images=moodboard_images,
             style_ref_images=style_ref_images,
+            logo_only=logo_only,
         )
         results[direction.option_number] = assets
 
@@ -202,12 +205,16 @@ Example output: ["saas", "tech", "startup", "minimal", "geometric", "confident",
 # Order follows image-model best practice:
 #   1. Subject + form  →  2. Composition  →  3. Color  →  4. Style  →  5. Render  →  6. Avoid
 
-def _logo_spec_to_prompt(spec) -> str:
+def _logo_spec_to_prompt(spec, brand_name: str = "") -> str:
     """Translate a LogoSpec (Pydantic model or dict) to a natural language image prompt.
 
     All logo types use ONE color (monochrome rule).
     For logotype / combination: text IS part of the mark — no text-ban clause.
     For symbol / abstract_mark / lettermark: text is forbidden.
+
+    Args:
+        spec: LogoSpec pydantic model or dict
+        brand_name: actual brand name — used to validate lettermark initial
     """
     d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     if not d:
@@ -227,6 +234,43 @@ def _logo_spec_to_prompt(spec) -> str:
     avoid          = d.get("avoid", [])
 
     color_label = f"{color_name} {color_hex}".strip()
+
+    # ── Lettermark initial validation (Fix 1 defence) ─────────────────────
+    if logo_type_raw == "lettermark" and brand_name:
+        expected_initial = brand_name.strip()[0].upper() if brand_name.strip() else ""
+        form_upper = form.upper()
+        # Check if the expected letter is mentioned in the form description
+        if expected_initial and expected_initial not in form_upper:
+            console.print(
+                f"  [yellow]⚠ Lettermark fix: form mentions wrong letter, "
+                f"expected '{expected_initial}' (from brand '{brand_name}'). Auto-patching.[/yellow]"
+            )
+            # Replace the first single uppercase letter reference in form with the correct one
+            import re
+            # Find patterns like "uppercase X" or "letter X" and replace X with correct initial
+            form = re.sub(
+                r'((?:uppercase|letter|capital)\s+)[A-Z]\b',
+                f'\\1{expected_initial}',
+                form,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            # If no pattern found, prepend the correct letter
+            if expected_initial not in form.upper():
+                form = f"uppercase {expected_initial}, {form}"
+
+    # ── Hard cliché avoids (Fix 3 defence) ────────────────────────────────
+    # These pictorial clichés are injected into every logo prompt's avoid list
+    # regardless of what the Director specified, as a last line of defence.
+    HARD_CLICHE_AVOIDS = [
+        "coffee cup", "mug", "teacup", "cup icon", "drinking vessel",
+        "coffee bean", "steam wisps", "fork", "spoon", "chef hat",
+        "lightbulb", "gear", "cog", "circuit board", "binary code",
+        "upward arrow", "growth chart", "dollar sign", "scales",
+        "stethoscope", "pill", "red cross", "heartbeat line",
+        "hanger", "mannequin", "scissors",
+        "house outline", "key silhouette", "location pin",
+    ]
 
     fill_desc = {
         "solid_fill":               f"solid flat fill in {color_label}",
@@ -379,6 +423,37 @@ def _bg_spec_to_prompt(spec) -> str:
     return " ".join(p for p in parts if p.strip())
 
 
+def generate_single_direction_assets(
+    direction: BrandDirection,
+    output_dir: Path,
+    brief_keywords: Optional[list] = None,
+    brand_name: str = "",
+    brief_tagline: str = "",
+    brief_ad_slogan: str = "",
+    brief_announcement_copy: str = "",
+    brief_text: str = "",
+    moodboard_images: Optional[list] = None,
+    style_ref_images: Optional[list] = None,
+) -> "DirectionAssets":
+    """
+    Generate full assets (bg + logo + pattern + palette + shades) for ONE direction.
+    Used in Phase 2 after the user selects a logo direction.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return _generate_direction_assets(
+        direction, output_dir,
+        brief_keywords=brief_keywords,
+        brand_name=brand_name,
+        brief_tagline=brief_tagline,
+        brief_ad_slogan=brief_ad_slogan,
+        brief_announcement_copy=brief_announcement_copy,
+        brief_text=brief_text,
+        moodboard_images=moodboard_images,
+        style_ref_images=style_ref_images,
+        logo_only=False,
+    )
+
+
 def _generate_direction_assets(
     direction: BrandDirection,
     output_dir: Path,
@@ -390,6 +465,7 @@ def _generate_direction_assets(
     brief_text: str = "",
     moodboard_images: Optional[list] = None,
     style_ref_images: Optional[list] = None,
+    logo_only: bool = False,
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
@@ -411,7 +487,10 @@ def _generate_direction_assets(
         return getattr(direction, prompt_attr, "") or ""
 
     bg_prompt      = _get_prompt("background_spec", "background_prompt", _bg_spec_to_prompt)
-    logo_prompt    = _get_prompt("logo_spec",        "logo_prompt",       _logo_spec_to_prompt)
+    logo_prompt    = _get_prompt(
+        "logo_spec", "logo_prompt",
+        lambda spec: _logo_spec_to_prompt(spec, brand_name=brand_name),
+    )
     pattern_prompt = _get_prompt("pattern_spec",     "pattern_prompt",    _pattern_spec_to_prompt)
 
     # Detect whether logo type allows text (logotype / combination)
@@ -429,12 +508,8 @@ def _generate_direction_assets(
         f"prompt: {logo_prompt[:100]}…[/dim]"
     )
 
-    background = _generate_image(
-        prompt=bg_prompt,
-        save_path=asset_dir / "background.png",
-        label="background",
-        size_hint="wide landscape, 16:9 aspect ratio",
-    )
+    # ── Background — removed (pattern serves as background) ──────────────────
+    background = None
 
     logo = _generate_image(
         prompt=logo_prompt,
@@ -447,86 +522,90 @@ def _generate_direction_assets(
         style_ref_images=style_ref_images,
     )
 
-    pattern = _generate_image(
-        prompt=pattern_prompt,
-        save_path=asset_dir / "pattern.png",
-        label="pattern",
-        size_hint="square tile, seamlessly repeatable",
-        brief_keywords=effective_keywords,
-        moodboard_images=moodboard_images,
-    )
+    # ── Pattern (skipped in logo_only mode) ──────────────────────────────────
+    pattern = None
+    if not logo_only:
+        pattern = _generate_image(
+            prompt=pattern_prompt,
+            save_path=asset_dir / "pattern.png",
+            label="pattern",
+            size_hint="square tile, seamlessly repeatable",
+            brief_keywords=effective_keywords,
+            moodboard_images=moodboard_images,
+        )
 
     # Create white / black / transparent logo variants for compositor use
     variants: dict = {}
     if logo and logo.exists() and logo.stat().st_size > 100:
         variants = _create_logo_variants(logo, asset_dir)
 
-    # ── Fetch real-world color palette ────────────────────────────────────────
+    # ── Palette + shades (skipped in logo_only mode) ──────────────────────────
     enriched_colors: Optional[List[dict]] = None
     palette_png: Optional[Path] = None
-    try:
-        from .palette_fetcher import fetch_palette_for_direction
-        from .palette_renderer import render_palette
-
-        console.print("  [dim]Fetching curated color palette…[/dim]")
-        direction_color_dicts = [
-            {"hex": c.hex, "name": c.name, "role": c.role}
-            for c in direction.colors
-        ]
-        enriched_colors = fetch_palette_for_direction(
-            keywords=effective_keywords or [],
-            direction_colors=direction_color_dicts,
-        )
-
-        if enriched_colors:
-            palette_path = asset_dir / "palette.png"
-            render_palette(
-                colors=enriched_colors,
-                output_path=palette_path,
-                width=2400,
-                height=640,
-                direction_name=direction.direction_name,
-            )
-            if palette_path.exists() and palette_path.stat().st_size > 100:
-                palette_png = palette_path
-                console.print(
-                    f"  [green]✓ palette[/green] → {palette_path.name} "
-                    f"[dim]({len(enriched_colors)} colors, "
-                    f"source: {enriched_colors[0].get('source', 'ai')})[/dim]"
-                )
-    except Exception as _pe:
-        console.print(f"  [dim]Palette fetch skipped: {_pe}[/dim]")
-
-    # ── Generate shade scales (11-stop tints/shades per color) ───────────────
     palette_shades: Optional[Dict[str, Dict[int, str]]] = None
     shades_png: Optional[Path] = None
-    try:
-        from .shade_generator import generate_palette_shades, render_shade_scale
 
-        console.print("  [dim]Generating shade scales…[/dim]")
-        colors_for_shades = enriched_colors if enriched_colors else [
-            {"hex": c.hex, "name": c.name, "role": c.role}
-            for c in direction.colors
-        ]
-        palette_shades = generate_palette_shades(colors_for_shades, use_api=True)
+    if not logo_only:
+        try:
+            from .palette_fetcher import fetch_palette_for_direction
+            from .palette_renderer import render_palette
 
-        if palette_shades:
-            shades_path = asset_dir / "shades.png"
-            render_shade_scale(
-                palette_shades,
-                output_path=shades_path,
-                enriched_colors=colors_for_shades,
-                width=2400,
+            console.print("  [dim]Fetching curated color palette…[/dim]")
+            direction_color_dicts = [
+                {"hex": c.hex, "name": c.name, "role": c.role}
+                for c in direction.colors
+            ]
+            enriched_colors = fetch_palette_for_direction(
+                keywords=effective_keywords or [],
+                direction_colors=direction_color_dicts,
             )
-            if shades_path.exists() and shades_path.stat().st_size > 100:
-                shades_png = shades_path
-                n_colors = len(palette_shades)
-                console.print(
-                    f"  [green]✓ shades[/green] → {shades_path.name} "
-                    f"[dim]({n_colors} colors × 11 stops)[/dim]"
+
+            if enriched_colors:
+                palette_path = asset_dir / "palette.png"
+                render_palette(
+                    colors=enriched_colors,
+                    output_path=palette_path,
+                    width=2400,
+                    height=640,
+                    direction_name=direction.direction_name,
                 )
-    except Exception as _se:
-        console.print(f"  [dim]Shade generation skipped: {_se}[/dim]")
+                if palette_path.exists() and palette_path.stat().st_size > 100:
+                    palette_png = palette_path
+                    console.print(
+                        f"  [green]✓ palette[/green] → {palette_path.name} "
+                        f"[dim]({len(enriched_colors)} colors, "
+                        f"source: {enriched_colors[0].get('source', 'ai')})[/dim]"
+                    )
+        except Exception as _pe:
+            console.print(f"  [dim]Palette fetch skipped: {_pe}[/dim]")
+
+        try:
+            from .shade_generator import generate_palette_shades, render_shade_scale
+
+            console.print("  [dim]Generating shade scales…[/dim]")
+            colors_for_shades = enriched_colors if enriched_colors else [
+                {"hex": c.hex, "name": c.name, "role": c.role}
+                for c in direction.colors
+            ]
+            palette_shades = generate_palette_shades(colors_for_shades, use_api=True)
+
+            if palette_shades:
+                shades_path = asset_dir / "shades.png"
+                render_shade_scale(
+                    palette_shades,
+                    output_path=shades_path,
+                    enriched_colors=colors_for_shades,
+                    width=2400,
+                )
+                if shades_path.exists() and shades_path.stat().st_size > 100:
+                    shades_png = shades_path
+                    n_colors = len(palette_shades)
+                    console.print(
+                        f"  [green]✓ shades[/green] → {shades_path.name} "
+                        f"[dim]({n_colors} colors × 11 stops)[/dim]"
+                    )
+        except Exception as _se:
+            console.print(f"  [dim]Shade generation skipped: {_se}[/dim]")
 
     return DirectionAssets(
         direction=direction,
@@ -698,12 +777,24 @@ def _generate_image(
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
                         parts.append(types.Part.from_text(
                             text=(
-                                f"⭐ STYLE ANCHOR {i + 1} — "
-                                "This is the user's chosen visual style reference. "
-                                "Your logo MUST match this visual aesthetic EXACTLY: "
-                                "same rendering approach (flat/vector/hand-drawn/geometric), "
-                                "same stroke weight and line quality, same level of detail and simplicity. "
-                                "The concept/subject of your logo will differ, but the HOW it looks must match this."
+                                f"⭐ STYLE ANCHOR {i + 1} — MANDATORY RENDERING TEMPLATE\n\n"
+                                "CRITICAL INSTRUCTION: Your generated logo MUST look like it was made by "
+                                "THE SAME DESIGNER who made this reference image.\n\n"
+                                "You MUST copy these properties EXACTLY from this reference:\n"
+                                "  1. LINE QUALITY — if the ref uses hand-drawn/organic lines, your output "
+                                "     MUST also use hand-drawn/organic lines. If the ref uses clean vectors, "
+                                "     your output MUST also use clean vectors. NO EXCEPTIONS.\n"
+                                "  2. STROKE WEIGHT — match the exact thickness and weight of strokes.\n"
+                                "  3. FILL STYLE — if ref is outline-only, yours must be outline-only. "
+                                "     If ref is solid fill, yours must be solid fill.\n"
+                                "  4. DETAIL LEVEL — if ref is minimal/simple, yours must be minimal/simple. "
+                                "     If ref is detailed/complex, yours must be detailed/complex.\n"
+                                "  5. RENDERING MEDIUM — if ref looks hand-drawn/brush/ink, your output MUST "
+                                "     look hand-drawn/brush/ink. If ref looks digital/vector, yours MUST too.\n\n"
+                                "Your logo's CONCEPT and SUBJECT will be different from this reference, "
+                                "but the VISUAL EXECUTION (how it is drawn/rendered) must be identical.\n\n"
+                                "⛔ If this reference is hand-drawn/organic, DO NOT generate clean geometric "
+                                "vectors. If this reference is clean vectors, DO NOT generate hand-drawn marks."
                             )
                         ))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
@@ -712,7 +803,7 @@ def _generate_image(
                     except Exception:
                         pass
                 if style_refs_loaded:
-                    console.print(f"  [dim]style anchor injected: {style_refs_loaded} ref(s) — aesthetic locked[/dim]")
+                    console.print(f"  [dim]style anchor injected: {style_refs_loaded} ref(s) — rendering technique locked[/dim]")
 
             # ── Layer 1: client moodboard images ──────────────────────────
             client_refs = list(moodboard_images or [])

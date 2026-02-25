@@ -1927,7 +1927,7 @@ async def _run_pipeline_phase2(
 
     progress_msg = await context.bot.send_message(
         chat_id=chat_id,
-        text=f"⏳ *Phase 2 — {direction_name}*\n\n🖌 Đang render logo variants, background, palette, pattern\\.\\.\\.",
+        text=f"⏳ *Phase 2 — {direction_name}*\n\n🖌 Đang render logo variants, palette, pattern\\.\\.\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     progress_msg_id = progress_msg.message_id
@@ -2003,20 +2003,7 @@ async def _run_pipeline_phase2(
                     except Exception:
                         pass
 
-    # ── Step 3: Send background ───────────────────────────────────────────────
-    bg = getattr(assets, "background", None) if assets else None
-    if bg and Path(bg).exists():
-        await context.bot.send_message(
-            chat_id=chat_id, text="🌄 *Background*\\:", parse_mode=ParseMode.MARKDOWN_V2
-        )
-        try:
-            await context.bot.send_document(
-                chat_id=chat_id, document=open(bg, "rb"), filename=Path(bg).name
-            )
-        except Exception as e:
-            logger.warning(f"Background send failed: {e}")
-
-    # ── Step 4: Send palette + shades ─────────────────────────────────────────
+    # ── Step 3: Send palette + shades ────────────────────────────────────────
     palette_png = result.palette_png or (getattr(assets, "palette_png", None) if assets else None)
     shades_png  = getattr(assets, "shades_png", None) if assets else None
 
