@@ -2,11 +2,11 @@
 palette_fetcher.py — Fetch real curated color palettes from free online databases.
 
 Sources (in priority order):
-  1. ColourLovers API — largest community palette DB, keyword search, no auth needed
-     https://www.colourlovers.com/api/palettes?format=json&keywords=...
-  2. ColorMind API — AI-generated palettes based on reference colors
+  1. Color Hunt  — community-curated, sorted by likes, tag-based search (unofficial API)
+     POST https://colorhunt.co/php/feed.php
+  2. ColorMind   — AI palette generation seeded from direction colors
      http://colormind.io/api/
-  3. Fallback — use the AI-generated palette from the direction
+  3. Fallback    — use the AI-generated palette from the direction as-is
 
 Usage:
     from src.palette_fetcher import fetch_palette_for_direction
@@ -14,14 +14,13 @@ Usage:
         keywords=["minimal", "tech", "navy"],
         direction_colors=[{"hex": "#2C3E50", "name": "Deep Navy", "role": "primary"}, ...]
     )
-    # Returns list of color dicts with hex, name, role, source
+    # Returns list of color dicts: {hex, name, role, cmyk, source}
 """
 
 from __future__ import annotations
 
 import json
 import math
-import re
 import urllib.request
 import urllib.parse
 from typing import List, Dict, Optional, Tuple
@@ -30,12 +29,181 @@ from rich.console import Console
 
 console = Console()
 
-# ── API endpoints ─────────────────────────────────────────────────────────────
+# ── API endpoints ──────────────────────────────────────────────────────────────
 
-COLOURLOVERS_URL = "http://www.colourlovers.com/api/palettes"
-COLORMIND_URL    = "http://colormind.io/api/"
+COLORHUNT_URL = "https://colorhunt.co/php/feed.php"
+COLORMIND_URL = "http://colormind.io/api/"
 
-# ── Color math ────────────────────────────────────────────────────────────────
+# ── Color Hunt tag vocabulary ──────────────────────────────────────────────────
+# Full list of valid Color Hunt tags (as of 2025)
+
+COLORHUNT_TAGS = {
+    # Palette colors
+    "orange", "yellow", "green", "teal", "blue", "purple",
+    "pink", "red", "beige", "brown", "black", "white", "grey", "gold",
+    # Moods / aesthetics
+    "pastel", "vintage", "retro", "neon", "light", "dark",
+    "warm", "cold", "summer", "fall", "winter", "spring",
+    "happy", "nature", "earth", "night", "space", "rainbow",
+    "gradient", "sunset", "sky", "sea",
+    # Use cases
+    "kids", "skin", "food", "cream", "coffee",
+    "wedding", "christmas", "halloween", "monochrome",
+}
+
+# ── Keyword → Color Hunt tag mapping ──────────────────────────────────────────
+# Maps brand keywords (from brief / Gemini tags) → ranked list of Color Hunt tags.
+# First tag in the list = highest priority for search.
+
+KEYWORD_TAG_MAP: Dict[str, List[str]] = {
+    # ── Tech / Digital ────────────────────────────────────────────────────────
+    "tech":         ["blue", "dark", "night"],
+    "saas":         ["blue", "gradient", "light"],
+    "software":     ["blue", "dark", "gradient"],
+    "startup":      ["gradient", "neon", "blue"],
+    "digital":      ["blue", "dark", "gradient"],
+    "app":          ["gradient", "blue", "neon"],
+    "ai":           ["dark", "neon", "gradient"],
+    "data":         ["blue", "dark", "teal"],
+    "cloud":        ["blue", "sky", "light"],
+    "crypto":       ["dark", "neon", "blue"],
+    "web3":         ["dark", "neon", "purple"],
+    "blockchain":   ["dark", "blue", "neon"],
+    "cybersecurity":["dark", "blue", "neon"],
+
+    # ── Minimal / Clean ────────────────────────────────────────────────────────
+    "minimal":      ["monochrome", "light", "grey"],
+    "minimalist":   ["monochrome", "light", "beige"],
+    "clean":        ["light", "white", "grey"],
+    "simple":       ["light", "pastel", "monochrome"],
+    "modern":       ["gradient", "blue", "dark"],
+    "flat":         ["light", "pastel", "monochrome"],
+    "geometric":    ["monochrome", "dark", "blue"],
+
+    # ── Finance / Corporate ────────────────────────────────────────────────────
+    "finance":      ["blue", "dark", "gold"],
+    "fintech":      ["blue", "dark", "teal"],
+    "banking":      ["blue", "dark", "gold"],
+    "corporate":    ["blue", "grey", "dark"],
+    "enterprise":   ["blue", "dark", "monochrome"],
+    "professional": ["blue", "dark", "monochrome"],
+    "consulting":   ["blue", "dark", "gold"],
+    "b2b":          ["blue", "dark", "grey"],
+    "trust":        ["blue", "teal", "dark"],
+    "serious":      ["dark", "monochrome", "blue"],
+
+    # ── Luxury / Premium ──────────────────────────────────────────────────────
+    "luxury":       ["gold", "black", "dark"],
+    "premium":      ["gold", "dark", "monochrome"],
+    "elegant":      ["gold", "dark", "beige"],
+    "exclusive":    ["gold", "black", "dark"],
+    "high-end":     ["gold", "dark", "monochrome"],
+    "fashion":      ["pastel", "beige", "monochrome"],
+    "editorial":    ["monochrome", "dark", "beige"],
+
+    # ── Nature / Organic ──────────────────────────────────────────────────────
+    "nature":       ["nature", "earth", "green"],
+    "organic":      ["earth", "green", "nature"],
+    "eco":          ["green", "earth", "nature"],
+    "natural":      ["earth", "nature", "green"],
+    "sustainable":  ["green", "earth", "nature"],
+    "botanical":    ["green", "nature", "earth"],
+    "plant":        ["green", "nature", "spring"],
+    "wellness":     ["green", "pastel", "nature"],
+    "health":       ["green", "teal", "light"],
+    "medical":      ["blue", "teal", "light"],
+
+    # ── Warm / Energetic ──────────────────────────────────────────────────────
+    "warm":         ["warm", "orange", "yellow"],
+    "energy":       ["neon", "orange", "yellow"],
+    "vibrant":      ["neon", "rainbow", "gradient"],
+    "bold":         ["orange", "red", "neon"],
+    "dynamic":      ["gradient", "orange", "neon"],
+    "powerful":     ["dark", "red", "orange"],
+    "confident":    ["orange", "dark", "gold"],
+    "playful":      ["rainbow", "pastel", "neon"],
+    "fun":          ["rainbow", "pastel", "happy"],
+    "kids":         ["kids", "rainbow", "pastel"],
+
+    # ── Calm / Soft ───────────────────────────────────────────────────────────
+    "calm":         ["pastel", "blue", "sky"],
+    "soft":         ["pastel", "light", "pink"],
+    "gentle":       ["pastel", "beige", "light"],
+    "feminine":     ["pink", "pastel", "purple"],
+    "accessible":   ["light", "pastel", "blue"],
+    "friendly":     ["pastel", "happy", "warm"],
+    "trustworthy":  ["blue", "teal", "light"],
+    "innovative":   ["gradient", "neon", "blue"],
+
+    # ── Food / Beverage ───────────────────────────────────────────────────────
+    "food":         ["food", "warm", "orange"],
+    "coffee":       ["coffee", "brown", "warm"],
+    "restaurant":   ["warm", "brown", "food"],
+    "beverage":     ["food", "orange", "warm"],
+    "bakery":       ["beige", "cream", "warm"],
+    "cream":        ["cream", "beige", "light"],
+
+    # ── Lifestyle / Wellness ───────────────────────────────────────────────────
+    "lifestyle":    ["pastel", "warm", "beige"],
+    "beauty":       ["pink", "pastel", "beige"],
+    "spa":          ["green", "pastel", "light"],
+    "yoga":         ["earth", "pastel", "nature"],
+
+    # ── Seasonal ──────────────────────────────────────────────────────────────
+    "summer":       ["summer", "yellow", "orange"],
+    "winter":       ["winter", "blue", "cold"],
+    "spring":       ["spring", "pastel", "green"],
+    "fall":         ["fall", "orange", "brown"],
+    "autumn":       ["fall", "orange", "brown"],
+
+    # ── Aesthetic keywords ─────────────────────────────────────────────────────
+    "dark":         ["dark", "night", "black"],
+    "light":        ["light", "white", "pastel"],
+    "futuristic":   ["neon", "dark", "night"],
+    "gradient":     ["gradient", "rainbow", "sunset"],
+    "sky":          ["sky", "blue", "gradient"],
+    "space":        ["space", "night", "dark"],
+    "sunset":       ["sunset", "orange", "warm"],
+    "ocean":        ["sea", "blue", "teal"],
+    "sea":          ["sea", "blue", "teal"],
+    "retro":        ["retro", "vintage", "warm"],
+    "vintage":      ["vintage", "retro", "brown"],
+    "neon":         ["neon", "dark", "rainbow"],
+    "monochrome":   ["monochrome", "grey", "dark"],
+    "wedding":      ["wedding", "beige", "pastel"],
+    "rainbow":      ["rainbow", "gradient", "neon"],
+    "night":        ["night", "dark", "space"],
+    "gold":         ["gold", "dark", "warm"],
+    "purple":       ["purple", "dark", "gradient"],
+    "pink":         ["pink", "pastel", "happy"],
+    "teal":         ["teal", "blue", "sea"],
+    "earth":        ["earth", "nature", "brown"],
+}
+
+
+def _keywords_to_colorhunt_tags(keywords: List[str]) -> List[str]:
+    """
+    Map brand keywords to the best-matching Color Hunt tag(s).
+    Returns deduplicated list, most-confident tag first.
+    """
+    seen: Dict[str, int] = {}  # tag → score (higher = more confident)
+    for kw in keywords:
+        kw_lower = kw.strip().lower()
+        # Direct tag match
+        if kw_lower in COLORHUNT_TAGS:
+            seen[kw_lower] = seen.get(kw_lower, 0) + 10
+        # Mapped keyword
+        mapped = KEYWORD_TAG_MAP.get(kw_lower, [])
+        for i, tag in enumerate(mapped):
+            score = 5 - i  # first tag = 5pts, second = 4pts, ...
+            seen[tag] = seen.get(tag, 0) + score
+
+    # Sort by score descending, return top tags
+    sorted_tags = sorted(seen.items(), key=lambda x: -x[1])
+    return [tag for tag, _ in sorted_tags[:6]]
+
+
+# ── Color math ─────────────────────────────────────────────────────────────────
 
 def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
     h = hex_str.lstrip("#")
@@ -45,7 +213,6 @@ def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
 
 
 def rgb_to_cmyk(r: int, g: int, b: int) -> Tuple[int, int, int, int]:
-    """Convert RGB (0-255) → CMYK (0-100 percent)."""
     if r == g == b == 0:
         return 0, 0, 0, 100
     rf, gf, bf = r / 255, g / 255, b / 255
@@ -59,160 +226,164 @@ def rgb_to_cmyk(r: int, g: int, b: int) -> Tuple[int, int, int, int]:
 
 
 def color_distance(hex_a: str, hex_b: str) -> float:
-    """Euclidean distance between two hex colors in RGB space."""
     ra, ga, ba = hex_to_rgb(hex_a)
     rb, gb, bb = hex_to_rgb(hex_b)
     return math.sqrt((ra - rb) ** 2 + (ga - gb) ** 2 + (ba - bb) ** 2)
 
 
 def luminance(r: int, g: int, b: int) -> float:
-    """Perceived luminance (0–1). > 0.5 → light color."""
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255
 
 
 def palette_similarity(fetched_hexes: List[str], direction_hexes: List[str]) -> float:
     """
-    Score how similar a fetched palette is to the direction's palette.
-    Uses nearest-neighbor average distance (lower = more similar).
+    Nearest-neighbor average RGB distance between two palettes.
+    Lower = more similar. Range ≈ 0–440.
     """
     if not fetched_hexes or not direction_hexes:
         return 999.0
-    total = 0.0
-    for dh in direction_hexes:
-        min_dist = min(color_distance(dh, fh) for fh in fetched_hexes)
-        total += min_dist
+    total = sum(
+        min(color_distance(dh, fh) for fh in fetched_hexes)
+        for dh in direction_hexes
+    )
     return total / len(direction_hexes)
 
 
-# ── Color name lookup ─────────────────────────────────────────────────────────
-
-# Compact named-color dictionary for descriptive naming
-_NAMED_COLORS: Dict[str, str] = {
-    "000000": "Black", "ffffff": "White", "ff0000": "Red",
-    "00ff00": "Green", "0000ff": "Blue", "ffff00": "Yellow",
-    "ff00ff": "Magenta", "00ffff": "Cyan", "808080": "Gray",
-    "c0c0c0": "Silver", "800000": "Maroon", "008000": "Forest",
-    "000080": "Navy", "808000": "Olive", "800080": "Purple",
-    "008080": "Teal", "ffa500": "Orange", "ffc0cb": "Pink",
-    "a52a2a": "Brown", "f5f5dc": "Beige", "ffe4c4": "Bisque",
-    "2c3e50": "Slate", "1a1a2e": "Midnight", "16213e": "Abyss",
-    "0f3460": "Cobalt", "533483": "Violet", "e94560": "Crimson",
-}
-
-def _closest_named_color(hex_str: str) -> str:
-    """Return the name of the closest named color by RGB distance."""
-    h = hex_str.lstrip("#").lower()
-    if h in _NAMED_COLORS:
-        return _NAMED_COLORS[h]
-    r, g, b = hex_to_rgb(hex_str)
-    best_name, best_dist = "Color", 999999.0
-    for named_hex, name in _NAMED_COLORS.items():
-        nr, ng, nb = hex_to_rgb(named_hex)
-        d = (r - nr) ** 2 + (g - ng) ** 2 + (b - nb) ** 2
-        if d < best_dist:
-            best_dist, best_name = d, name
-    return best_name
-
+# ── Color name generation ──────────────────────────────────────────────────────
 
 def _descriptive_name(hex_str: str, idx: int) -> str:
-    """Generate a short descriptive color name from hex + position."""
     r, g, b = hex_to_rgb(hex_str)
     lum = luminance(r, g, b)
-
-    # Dominant channel
     max_ch = max(r, g, b)
-    if max_ch < 30:
-        return "Shadow"
-    if lum > 0.88:
-        return "White" if max_ch > 240 else "Mist"
-    if lum < 0.12:
-        return "Ink" if idx == 0 else "Deep"
 
-    hue_names = []
+    if max_ch < 30:         return "Shadow"
+    if lum > 0.88:          return "White" if max_ch > 240 else "Mist"
+    if lum < 0.12:          return "Ink" if idx == 0 else "Deep"
+
     if r > g and r > b:
-        hue_names = ["Ember", "Rust", "Terra", "Crimson", "Blush"]
+        names = ["Ember", "Rust", "Terra", "Crimson", "Blush"]
     elif g > r and g > b:
-        hue_names = ["Sage", "Forest", "Fern", "Jade", "Moss"]
+        names = ["Sage", "Forest", "Fern", "Jade", "Moss"]
     elif b > r and b > g:
-        hue_names = ["Cobalt", "Navy", "Slate", "Ice", "Dusk"]
+        names = ["Cobalt", "Navy", "Slate", "Ice", "Dusk"]
     elif r > 180 and g > 150 and b < 100:
-        hue_names = ["Gold", "Amber", "Sand", "Wheat", "Honey"]
+        names = ["Gold", "Amber", "Sand", "Wheat", "Honey"]
     elif r > 150 and b > 150 and g < 100:
-        hue_names = ["Mauve", "Plum", "Lilac", "Violet", "Orchid"]
+        names = ["Mauve", "Plum", "Lilac", "Violet", "Orchid"]
     else:
-        hue_names = ["Stone", "Clay", "Dust", "Muted", "Tone"]
+        names = ["Stone", "Clay", "Dust", "Muted", "Tone"]
 
-    return hue_names[idx % len(hue_names)]
+    return names[idx % len(names)]
 
 
 ROLES = ["primary", "secondary", "accent", "background", "text", "surface"]
 
 
 def _assign_roles(colors: List[Dict]) -> List[Dict]:
-    """Assign primary/secondary/accent/background/text roles by luminance order."""
-    sorted_by_lum = sorted(
-        colors,
-        key=lambda c: luminance(*hex_to_rgb(c["hex"])),
-    )
-    role_order = ["background", "text", "primary", "secondary", "accent", "surface"]
+    """Assign roles by luminance: darkest=text, lightest=background, mid=primary etc."""
+    sorted_by_lum = sorted(colors, key=lambda c: luminance(*hex_to_rgb(c["hex"])))
+    role_order = ["text", "primary", "secondary", "accent", "surface", "background"]
     for i, c in enumerate(sorted_by_lum):
         c["role"] = role_order[i] if i < len(role_order) else "surface"
     return colors
 
 
-# ── Source 1: ColourLovers ────────────────────────────────────────────────────
+# ── Source 1: Color Hunt ───────────────────────────────────────────────────────
 
-def _fetch_colourlovers(
-    keywords: List[str],
-    num_per_keyword: int = 5,
+def _parse_colorhunt_code(code: str) -> Optional[List[str]]:
+    """
+    Parse a Color Hunt palette code (24-char string) → list of 4 hex colors.
+    e.g. "ffbe0bfb5607ff006cfbff12" → ["#FFBE0B", "#FB5607", "#FF006C", "#FBFF12"]
+    """
+    code = code.strip().lower()
+    if len(code) != 24:
+        return None
+    try:
+        return [f"#{code[i*6:(i+1)*6].upper()}" for i in range(4)]
+    except Exception:
+        return None
+
+
+def _fetch_colorhunt(
+    tags: List[str],
+    sort: str = "popular",
+    step: int = 0,
     timeout: int = 8,
-) -> List[List[str]]:
+) -> List[Dict]:
     """
-    Search ColourLovers for palettes matching each keyword.
-    Returns list of hex-list palettes (no '#' prefix — add when using).
-    """
-    results: List[List[str]] = []
+    Fetch palettes from Color Hunt (unofficial API).
 
-    for kw in keywords[:4]:
+    Args:
+        tags:    Color Hunt tags to filter by (one at a time — API supports single tag)
+        sort:    "popular", "new", "random", "viewed"
+        step:    Pagination step (0 = first 20, 1 = next 20, ...)
+        timeout: Request timeout in seconds
+
+    Returns:
+        List of palette dicts: {hexes: List[str], likes: int, tags: str}
+    """
+    results: List[Dict] = []
+
+    for tag in tags:
+        tag = tag.strip().lower()
+        if tag not in COLORHUNT_TAGS:
+            continue
         try:
-            params = urllib.parse.urlencode({
-                "format": "json",
-                "keywords": kw,
-                "numResults": num_per_keyword,
-                "sortBy": "rating",
-            })
-            url = f"{COLOURLOVERS_URL}?{params}"
-            req = urllib.request.Request(url, headers={"User-Agent": "BrandIdentityBot/1.0"})
+            payload = urllib.parse.urlencode({
+                "step":   step,
+                "sort":   sort,
+                "tags":   tag,
+                "period": "",
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                COLORHUNT_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent":   "Mozilla/5.0 (compatible; BrandBot/1.0)",
+                    "Referer":      "https://colorhunt.co/",
+                    "Origin":       "https://colorhunt.co",
+                },
+                method="POST",
+            )
+
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
 
-            for palette in data:
-                hexes = [f"#{h}" for h in palette.get("colors", []) if h]
-                if len(hexes) >= 3:
-                    results.append(hexes)
+            tag_results = 0
+            for item in data:
+                code  = item.get("code", "")
+                likes = int(item.get("likes", 0))
+                hexes = _parse_colorhunt_code(code)
+                if hexes:
+                    results.append({
+                        "hexes": hexes,
+                        "likes": likes,
+                        "tags":  item.get("tags", tag),
+                    })
+                    tag_results += 1
 
-            if results:
+            if tag_results > 0:
                 console.print(
-                    f"  [dim]ColourLovers: {len(results)} palettes for '{kw}'[/dim]"
+                    f"  [dim]Color Hunt [{tag}]: {tag_results} palettes[/dim]"
                 )
-                break  # Stop after first keyword with results
+                # Got enough for this tag — try one more tag for variety
+                if len(results) >= 30:
+                    break
 
         except Exception as e:
-            console.print(f"  [dim]ColourLovers '{kw}' failed: {e}[/dim]")
+            console.print(f"  [dim]Color Hunt [{tag}] failed: {type(e).__name__}[/dim]")
             continue
 
     return results
 
 
-# ── Source 2: ColorMind ───────────────────────────────────────────────────────
+# ── Source 2: ColorMind ────────────────────────────────────────────────────────
 
 def _fetch_colormind(seed_colors: List[str], timeout: int = 6) -> Optional[List[str]]:
-    """
-    Use ColorMind to generate a 5-color palette seeded from existing colors.
-    Sends the 2 most contrasting seed colors, lets ColorMind fill the rest.
-    """
+    """Generate a 5-color palette from ColorMind, seeded from direction colors."""
     try:
-        # Pick first 2 seed colors, rest are "N" (fill in)
         seeds = []
         for h in seed_colors[:2]:
             r, g, b = hex_to_rgb(h)
@@ -231,99 +402,110 @@ def _fetch_colormind(seed_colors: List[str], timeout: int = 6) -> Optional[List[
             data = json.loads(resp.read().decode("utf-8"))
 
         rgb_list = data.get("result", [])
-        hexes = [f"#{r:02X}{g:02X}{b:02X}" for r, g, b in rgb_list if len(rgb_list) == 5]
-        if hexes:
+        if len(rgb_list) == 5:
+            hexes = [f"#{r:02X}{g:02X}{b:02X}" for r, g, b in rgb_list]
             console.print(f"  [dim]ColorMind: generated {len(hexes)}-color palette[/dim]")
             return hexes
 
     except Exception as e:
-        console.print(f"  [dim]ColorMind failed: {e}[/dim]")
+        console.print(f"  [dim]ColorMind failed: {type(e).__name__}[/dim]")
 
     return None
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
+# ── Main entry point ───────────────────────────────────────────────────────────
 
 def fetch_palette_for_direction(
     keywords: List[str],
     direction_colors: List[Dict],
-    prefer_fetched: bool = True,
+    top_n: int = 1,
 ) -> List[Dict]:
     """
     Fetch the best real-world color palette for a brand direction.
 
     Strategy:
-      1. Search ColourLovers with brand keywords → get candidate palettes
-      2. Score each candidate by similarity to direction's AI colors
-      3. Pick the best match (or use AI palette if fetch fails / no close match)
-      4. Optionally enrich with ColorMind for variations
+      1. Map brand keywords → Color Hunt tags
+      2. Fetch top palettes from Color Hunt (sorted by likes)
+      3. Score each fetched palette by similarity to direction's AI colors
+      4. Pick the highest-scored (most harmonious) palette
+      5. Fallback: ColorMind seeded from direction colors
+      6. Final fallback: enrich and return the original AI palette
 
     Args:
-        keywords: Brand keywords from brief
-        direction_colors: AI-generated palette from BrandDirection.color_palette
-        prefer_fetched: If True, prefer fetched palette when similarity is decent
+        keywords:         Brand keywords (from brief + Gemini auto-tags)
+        direction_colors: AI-generated palette dicts (hex, name, role)
+        top_n:            Number of palettes to return (almost always 1)
 
     Returns:
-        List of color dicts: {hex, name, role, cmyk, source}
-        Source is "colourlovers", "colormind", or "ai"
+        List of enriched color dicts: {hex, name, role, cmyk, source}
     """
     direction_hexes = [c.get("hex", "#888888") for c in direction_colors if c.get("hex")]
 
-    # ── Step 1: Try ColourLovers ───────────────────────────────────────────────
-    candidate_palettes = _fetch_colourlovers(keywords)
+    # ── Step 1: Map keywords → Color Hunt tags ─────────────────────────────────
+    ch_tags = _keywords_to_colorhunt_tags(keywords)
+    if ch_tags:
+        console.print(
+            f"  [dim]Color Hunt tags: {', '.join(ch_tags[:4])}[/dim]"
+        )
 
-    # ── Step 2: Score + pick best match ───────────────────────────────────────
+    # ── Step 2: Fetch from Color Hunt ─────────────────────────────────────────
     best_palette: Optional[List[str]] = None
-    best_score = 999.0
-    source = "ai"
+    best_score   = 999.0
+    source       = "ai"
 
-    if candidate_palettes:
-        for candidate in candidate_palettes:
-            score = palette_similarity(candidate, direction_hexes)
-            if score < best_score:
-                best_score = score
-                best_palette = candidate
+    if ch_tags:
+        candidates = _fetch_colorhunt(ch_tags[:4], sort="popular")
 
-        # Accept fetched palette if reasonably similar (distance < 120 avg per color)
-        # or if prefer_fetched is True and we got anything
-        if best_palette and (prefer_fetched or best_score < 120):
-            source = "colourlovers"
-            console.print(
-                f"  [green]✓[/green] Using ColourLovers palette "
-                f"[dim](similarity score: {best_score:.0f})[/dim]"
-            )
+        if candidates:
+            # Sort by likes first, then filter by similarity
+            candidates.sort(key=lambda x: -x["likes"])
 
-    # ── Step 3: Fallback to ColorMind ─────────────────────────────────────────
+            for candidate in candidates:
+                hexes = candidate["hexes"]
+                score = palette_similarity(hexes, direction_hexes)
+                if score < best_score:
+                    best_score    = score
+                    best_palette  = hexes
+
+            if best_palette:
+                source = "colorhunt"
+                console.print(
+                    f"  [green]✓[/green] Color Hunt palette selected "
+                    f"[dim](harmony score: {best_score:.0f})[/dim]"
+                )
+
+    # ── Step 3: Fallback → ColorMind ──────────────────────────────────────────
     if best_palette is None and direction_hexes:
         generated = _fetch_colormind(direction_hexes)
         if generated:
             best_palette = generated
-            source = "colormind"
+            source       = "colormind"
 
-    # ── Step 4: Final fallback — use AI palette ────────────────────────────────
+    # ── Step 4: Final fallback → AI palette ───────────────────────────────────
     if best_palette is None:
-        console.print("  [dim]Using AI-generated palette (no fetch results)[/dim]")
+        console.print("  [dim]Using AI-generated palette[/dim]")
         return _enrich_ai_palette(direction_colors)
 
-    # ── Step 5: Build enriched color dicts ────────────────────────────────────
     return _build_color_dicts(best_palette, source, direction_colors)
 
 
+# ── Palette enrichment helpers ─────────────────────────────────────────────────
+
 def _enrich_ai_palette(direction_colors: List[Dict]) -> List[Dict]:
-    """Enrich the AI-generated palette with CMYK values and source tag."""
+    """Enrich the AI-generated direction palette with CMYK and source tag."""
     result = []
-    for c in direction_colors:
+    for i, c in enumerate(direction_colors):
         hex_val = c.get("hex", "#888888")
         try:
             r, g, b = hex_to_rgb(hex_val)
-            cmyk = rgb_to_cmyk(r, g, b)
+            cmyk    = rgb_to_cmyk(r, g, b)
         except Exception:
             cmyk = (0, 0, 0, 50)
         result.append({
-            "hex": hex_val,
-            "name": c.get("name", _descriptive_name(hex_val, len(result))),
-            "role": c.get("role", ROLES[min(len(result), len(ROLES) - 1)]),
-            "cmyk": cmyk,
+            "hex":    hex_val,
+            "name":   c.get("name") or _descriptive_name(hex_val, i),
+            "role":   c.get("role") or ROLES[min(i, len(ROLES) - 1)],
+            "cmyk":   cmyk,
             "source": "ai",
         })
     return result
@@ -335,46 +517,44 @@ def _build_color_dicts(
     direction_colors: List[Dict],
 ) -> List[Dict]:
     """
-    Build enriched color dicts from a list of hex strings.
-    Names and roles are assigned intelligently.
+    Build enriched color dicts from a list of hex values.
+    Borrows names from direction_colors where colors are visually close.
     """
-    # Try to borrow names from direction_colors if hex is similar
-    dir_name_map = {}
-    for dc in direction_colors:
-        dh = dc.get("hex", "")
-        if dh:
-            dir_name_map[dh.upper()] = dc.get("name", "")
+    dir_name_map = {
+        dc.get("hex", "").upper(): dc.get("name", "")
+        for dc in direction_colors
+        if dc.get("hex")
+    }
 
     result = []
     for i, hex_val in enumerate(hexes[:6]):
-        hex_val = hex_val.upper() if hex_val.startswith("#") else f"#{hex_val.upper()}"
+        hex_val = hex_val if hex_val.startswith("#") else f"#{hex_val}"
+        hex_val = hex_val.upper()
 
-        # Try to find a matching name from direction
+        # Borrow name from direction if a close color exists (dist < 80)
         name = ""
-        best_dist = 80  # threshold for "close enough to borrow name"
+        best_d = 80
         for dh, dname in dir_name_map.items():
             d = color_distance(hex_val, dh)
-            if d < best_dist:
-                best_dist = d
-                name = dname
+            if d < best_d and dname:
+                best_d, name = d, dname
 
         if not name:
             name = _descriptive_name(hex_val, i)
 
         try:
             r, g, b = hex_to_rgb(hex_val)
-            cmyk = rgb_to_cmyk(r, g, b)
+            cmyk    = rgb_to_cmyk(r, g, b)
         except Exception:
             cmyk = (0, 0, 0, 50)
 
         result.append({
-            "hex": hex_val,
-            "name": name,
-            "role": ROLES[min(i, len(ROLES) - 1)],
-            "cmyk": cmyk,
+            "hex":    hex_val,
+            "name":   name,
+            "role":   ROLES[min(i, len(ROLES) - 1)],
+            "cmyk":   cmyk,
             "source": source,
         })
 
-    # Re-assign roles by luminance
-    result = _assign_roles(result)
-    return result
+    # Re-assign roles by luminance order for proper hierarchy
+    return _assign_roles(result)
