@@ -1391,6 +1391,15 @@ def _fetch_preview_refs(brief, n: int = 4) -> list:
 
         scored.sort(key=lambda x: -x[0])
 
+        # ── Industry-first filter ─────────────────────────────────────────────
+        # If we have strong industry matches, ONLY show those — never mix in
+        # random style refs (mascot, brutalist, etc.) for a coffee brand.
+        has_industry_match = any(boost >= 3 for boost in industry_boosts.values())
+        if has_industry_match:
+            industry_only = [(s, c, p) for s, c, p in scored if c.startswith("industry_")]
+            if len(industry_only) >= n:
+                scored = industry_only
+
         # Pick n diverse images (one per category as much as possible)
         result: list = []
         seen_cats: set = set()
@@ -1985,14 +1994,29 @@ async def _run_logo_variants_and_palette_phase(
         try:
             await context.bot.send_document(
                 chat_id=chat_id, document=svg_path.read_bytes(),
-                filename=svg_path.name, caption="📐 Logo SVG vector",
+                filename=svg_path.name, caption="📐 Logo SVG (color)",
             )
         except Exception as e:
             logger.warning(f"SVG send failed: {e}")
 
+    # Send white and black SVG variants
+    svg_white = logo_variant_paths.get("logo_svg_white")
+    svg_black = logo_variant_paths.get("logo_svg_black")
+    for svg_p, label in [(svg_white, "📐 Logo SVG (white)"), (svg_black, "📐 Logo SVG (black)")]:
+        if svg_p and Path(svg_p).exists():
+            try:
+                await context.bot.send_document(
+                    chat_id=chat_id, document=Path(svg_p).read_bytes(),
+                    filename=Path(svg_p).name, caption=label,
+                )
+            except Exception as e:
+                logger.warning(f"SVG variant send failed: {e}")
+
     # Store variant paths for ZIP export later
     context.user_data["logo_variant_paths"] = logo_variant_paths
     context.user_data["logo_svg_path"] = str(svg_path) if svg_path else None
+    context.user_data["logo_svg_white_path"] = str(svg_white) if svg_white else None
+    context.user_data["logo_svg_black_path"] = str(svg_black) if svg_black else None
 
     # ── Step 2: Generate palette ──────────────────────────────────────────────
     progress_msg = await context.bot.send_message(
@@ -2341,14 +2365,16 @@ async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 
 async def step_pattern_ref_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle patref_upload / patref_skip callbacks."""
-    if not context.user_data.get(PATTERN_REF_FLAG):
-        return
     query = update.callback_query
     await query.answer()
     data = query.data
     chat_id = update.effective_chat.id
+    logger.info(f"Pattern ref callback: {data}, flag={context.user_data.get(PATTERN_REF_FLAG)}")
 
     if data == "patref_upload":
+        # Ensure flag is set so image handler picks up uploads
+        context.user_data[PATTERN_REF_FLAG] = True
+        context.user_data[PATTERN_REFS_KEY] = context.user_data.get(PATTERN_REFS_KEY, [])
         await query.edit_message_text(
             "📷 *Gửi ảnh pattern ref của bạn\\.*\n"
             "Gõ /done khi xong, hoặc /skip để bỏ qua\\.",

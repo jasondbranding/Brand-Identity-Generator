@@ -630,6 +630,65 @@ def _generate_direction_assets(
 # ── Modular phase functions (called independently by HITL pipeline) ────────────
 
 
+def _adjust_colors_with_gemini(
+    current_colors: List[dict],
+    feedback: str,
+) -> Optional[List[dict]]:
+    """
+    Use Gemini to interpret user color feedback and return adjusted palette.
+    Handles multilingual feedback (Vietnamese, English).
+    Returns list of color dicts [{hex, name, role}, ...] or None on failure.
+    """
+    import json as _json
+
+    hex_summary = ", ".join(
+        f"{c.get('role','?')}: {c.get('hex','?')} ({c.get('name','?')})"
+        for c in current_colors
+    )
+
+    prompt = (
+        "You are a color palette expert. A user has the following brand color palette:\n\n"
+        f"{hex_summary}\n\n"
+        f"The user wants to adjust the palette with this feedback:\n"
+        f'"{feedback}"\n\n'
+        "Generate an adjusted palette with the same number of colors. "
+        "Apply the user's feedback (which may be in Vietnamese or English). "
+        "Keep colors that the user didn't mention. Change/add/adjust ONLY what the user asked for.\n\n"
+        "Return ONLY a JSON array of objects with keys: hex, name, role.\n"
+        "Example: [{\"hex\": \"#1E3A2F\", \"name\": \"Forest\", \"role\": \"primary\"}, ...]\n"
+        "No explanation, no markdown fences — just the JSON array."
+    )
+
+    try:
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            return None
+
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+        text = resp.text.strip()
+        # Clean markdown fences if any
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+        colors = _json.loads(text)
+        if isinstance(colors, list) and len(colors) >= 2:
+            # Validate each has hex
+            for c in colors:
+                if not c.get("hex", "").startswith("#"):
+                    return None
+            return colors
+        return None
+    except Exception:
+        return None
+
+
 def generate_palette_only(
     direction: BrandDirection,
     output_dir: Path,
@@ -663,10 +722,24 @@ def generate_palette_only(
             for c in direction.colors
         ]
 
-        # If refinement feedback is given, adjust keywords
+        # If refinement feedback is given, use Gemini to adjust colors
         fetch_keywords = list(effective_keywords or [])
         if refinement_feedback:
             fetch_keywords.extend(refinement_feedback.lower().split())
+            # Use Gemini to interpret feedback and generate adjusted color palette
+            try:
+                import json as _json
+                adjusted = _adjust_colors_with_gemini(
+                    direction_color_dicts, refinement_feedback
+                )
+                if adjusted:
+                    direction_color_dicts = adjusted
+                    console.print(
+                        f"  [green]✓[/green] Palette adjusted by Gemini: "
+                        f"{', '.join(c.get('hex','') for c in adjusted)}"
+                    )
+            except Exception as adj_err:
+                console.print(f"  [yellow]⚠ Gemini color adjust: {adj_err}[/yellow]")
 
         enriched_colors = fetch_palette_for_direction(
             keywords=fetch_keywords,
@@ -798,7 +871,7 @@ def create_logo_variants_and_svg(
     variants = _create_logo_variants(logo_path, output_dir)
     result.update(variants)
 
-    # SVG via vtracer
+    # SVG via vtracer — color version from original logo
     try:
         import vtracer
         svg_path = output_dir / "logo.svg"
@@ -819,9 +892,63 @@ def create_logo_variants_and_svg(
         )
         if svg_path.exists() and svg_path.stat().st_size > 100:
             result["logo_svg"] = svg_path
-            console.print(f"  [green]✓ SVG[/green] → {svg_path.name}")
+            console.print(f"  [green]✓ SVG color[/green] → {svg_path.name}")
     except Exception as e:
         console.print(f"  [yellow]⚠ SVG conversion failed: {e}[/yellow]")
+
+    # SVG white variant — from white logo variant
+    white_variant = result.get("logo_white")
+    if white_variant and white_variant.exists():
+        try:
+            import vtracer
+            svg_white_path = output_dir / "logo_white.svg"
+            vtracer.convert_image_to_svg_py(
+                str(white_variant),
+                str(svg_white_path),
+                colormode="color",
+                hierarchical="stacked",
+                mode="spline",
+                filter_speckle=4,
+                color_precision=6,
+                layer_difference=16,
+                corner_threshold=60,
+                length_threshold=4.0,
+                max_iterations=10,
+                splice_threshold=45,
+                path_precision=3,
+            )
+            if svg_white_path.exists() and svg_white_path.stat().st_size > 100:
+                result["logo_svg_white"] = svg_white_path
+                console.print(f"  [green]✓ SVG white[/green] → {svg_white_path.name}")
+        except Exception as e:
+            console.print(f"  [yellow]⚠ SVG white failed: {e}[/yellow]")
+
+    # SVG black variant — from black logo variant
+    black_variant = result.get("logo_black")
+    if black_variant and black_variant.exists():
+        try:
+            import vtracer
+            svg_black_path = output_dir / "logo_black.svg"
+            vtracer.convert_image_to_svg_py(
+                str(black_variant),
+                str(svg_black_path),
+                colormode="color",
+                hierarchical="stacked",
+                mode="spline",
+                filter_speckle=4,
+                color_precision=6,
+                layer_difference=16,
+                corner_threshold=60,
+                length_threshold=4.0,
+                max_iterations=10,
+                splice_threshold=45,
+                path_precision=3,
+            )
+            if svg_black_path.exists() and svg_black_path.stat().st_size > 100:
+                result["logo_svg_black"] = svg_black_path
+                console.print(f"  [green]✓ SVG black[/green] → {svg_black_path.name}")
+        except Exception as e:
+            console.print(f"  [yellow]⚠ SVG black failed: {e}[/yellow]")
 
     return result
 
@@ -1550,8 +1677,8 @@ def _create_logo_variants(logo_path: Path, asset_dir: Path) -> dict:
 
     Steps:
       1. Remove near-white background (brightness ≥ 240 → transparent) → logo_transparent.png
-      2. Colorize all remaining opaque pixels white                     → logo_white.png
-      3. Colorize all remaining opaque pixels near-black                → logo_black.png
+      2. Colorize all remaining opaque pixels white, composite on BLACK bg → logo_white.png
+      3. Colorize all remaining opaque pixels near-black, composite on WHITE bg → logo_black.png
 
     Returns {"logo_transparent": Path, "logo_white": Path, "logo_black": Path}
     or {} on any failure.
@@ -1568,17 +1695,23 @@ def _create_logo_variants(logo_path: Path, asset_dir: Path) -> dict:
         arr[:, :, 3] = (arr[:, :, 3] * scale).clip(0, 255)
         transparent = _PILImage.fromarray(arr.astype(np.uint8), "RGBA")
 
-        # Step 2: White logo
+        # Step 2: White logo on BLACK background (visible in Telegram)
         white_arr = arr.copy()
         white_arr[:, :, :3] = 255
-        white_logo = _PILImage.fromarray(white_arr.astype(np.uint8), "RGBA")
+        white_rgba = _PILImage.fromarray(white_arr.astype(np.uint8), "RGBA")
+        black_canvas = _PILImage.new("RGB", white_rgba.size, (0, 0, 0))
+        black_canvas.paste(white_rgba, mask=white_rgba.split()[3])
+        white_logo = black_canvas
 
-        # Step 3: Black logo
+        # Step 3: Black logo on WHITE background
         black_arr = arr.copy()
         black_arr[:, :, 0] = 20
         black_arr[:, :, 1] = 20
         black_arr[:, :, 2] = 20
-        black_logo = _PILImage.fromarray(black_arr.astype(np.uint8), "RGBA")
+        black_rgba = _PILImage.fromarray(black_arr.astype(np.uint8), "RGBA")
+        white_canvas = _PILImage.new("RGB", black_rgba.size, (255, 255, 255))
+        white_canvas.paste(black_rgba, mask=black_rgba.split()[3])
+        black_logo = white_canvas
 
         trans_path = asset_dir / "logo_transparent.png"
         white_path = asset_dir / "logo_white.png"
@@ -1588,7 +1721,7 @@ def _create_logo_variants(logo_path: Path, asset_dir: Path) -> dict:
         white_logo.save(str(white_path), format="PNG")
         black_logo.save(str(black_path), format="PNG")
 
-        console.print("  [dim]  logo variants → transparent / white / black[/dim]")
+        console.print("  [dim]  logo variants → transparent / white-on-black / black-on-white[/dim]")
         
         return {
             "logo_transparent": trans_path,
