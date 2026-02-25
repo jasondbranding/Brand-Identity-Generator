@@ -74,15 +74,14 @@ logger = logging.getLogger(__name__)
     CORE_PROMISE,
     GEOGRAPHY,
     COMPETITORS,
-    MOODBOARD_NOTES,
-    MOODBOARD_IMAGES,
     LOGO_INSPIRATION,
     PATTERN_INSPIRATION,
     KEYWORDS,
     COLOR_PREFERENCES,
     MODE_CHOICE,
     CONFIRM,
-) = range(15)
+    REF_CHOICE,
+) = range(14)
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -381,8 +380,6 @@ def _next_unfilled_state(brief: "ConversationBrief") -> int:
         return GEOGRAPHY
     if not (brief.competitors_direct or brief.competitors_aspirational or brief.competitors_avoid):
         return COMPETITORS
-    if not brief.moodboard_notes:       # same
-        return MOODBOARD_NOTES
     if not brief.keywords:              # ["-"] is truthy → skips correctly
         return KEYWORDS
     if not brief.color_preferences:    # same
@@ -399,8 +396,7 @@ def _state_question_text(state: int) -> str:
         CORE_PROMISE: "*Bạn đã có sẵn slogan hay tagline chưa?*\n_\\(Nếu có thì paste vào — chưa có thì nhắn 'chưa có' là được\\)_",
         GEOGRAPHY:    "*Geography / thị trường mục tiêu?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
         COMPETITORS:  "*Đối thủ cạnh tranh?*\n_\\(Direct/Aspirational/Avoid — hoặc nhắn 'bỏ qua'\\)_",
-        MOODBOARD_NOTES: "*Moodboard notes?*\n_\\(optional — nhắn 'bỏ qua' nếu không có\\)_",
-        KEYWORDS:     "*Keywords thương hiệu?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
+        KEYWORDS:     "*3 \\- 5 tính từ miêu tả tính cách thương hiệu?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
         COLOR_PREFERENCES: "🎨 *Màu sắc ưu tiên?*\n_\\(optional — nhắn 'bỏ qua' để AI tự chọn\\)_",
     }.get(state, "*Chọn chế độ generate:*")
 
@@ -457,17 +453,9 @@ async def _ask_for_state(
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return COMPETITORS
-    if state == MOODBOARD_NOTES:
-        await update.message.reply_text(
-            "*Moodboard notes?*\n"
-            "_\\(optional — mô tả aesthetic bạn muốn, ví dụ: \"Minimal như Linear, accent màu navy\"\\)_\n"
-            "_Nhắn_ *bỏ qua* _nếu không có_",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return MOODBOARD_NOTES
     if state == KEYWORDS:
         await update.message.reply_text(
-            "*Keywords thương hiệu?*\n"
+            "*3 \\- 5 tính từ miêu tả tính cách thương hiệu?*\n"
             "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
             "_Nhắn_ *bỏ qua* _nếu chưa có_",
             parse_mode=ParseMode.MARKDOWN_V2,
@@ -550,14 +538,9 @@ def _get_reask_map() -> dict:
             "*Đối thủ cạnh tranh?*\n_Gõ /skip để bỏ qua_",
             None,
         ),
-        MOODBOARD_NOTES: (
-            "moodboard_notes",
-            "*Moodboard notes?*\n_Gõ /skip để bỏ qua_",
-            None,
-        ),
         KEYWORDS: (
             "keywords",
-            "*Keywords thương hiệu?*\n_\\(mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n_Gõ /skip để bỏ qua_",
+            "*3 \- 5 tính từ miêu tả tính cách thương hiệu?*\n_\\(mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n_Gõ /skip để bỏ qua_",
             None,
         ),
         COLOR_PREFERENCES: (
@@ -1103,96 +1086,9 @@ async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 # Unstructured: treat as direct
                 names = [n.strip() for n in re.split(r"[,;]", text) if n.strip()]
                 brief.competitors_direct = names
-                break
-
     await send_typing(update)
-    # Jump to the actual next unfilled state (moodboard may already be filled)
-    next_state = _next_unfilled_state(brief)
-    return await _ask_for_state(update, context, next_state)
-
-
-# ── Step 8: Moodboard Notes ───────────────────────────────────────────────────
-
-async def step_moodboard_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    intent = detect_intent(update.message.text or "")
-    if intent == "back":
-        return await handle_back(update, context)
-    brief = get_brief(context)
-    push_history(context, MOODBOARD_NOTES)
-    text = update.message.text.strip()
-
-    # Check for bulk input (e.g. user pastes moodboard + keywords together)
-    filled = _parse_bulk_fields(text, brief)
-    if filled >= 2:
-        next_state = _next_unfilled_state(brief)
-        if next_state == MODE_CHOICE:
-            await send_typing(update)
-            await update.message.reply_text(
-                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=MODE_KEYBOARD,
-            )
-            return MODE_CHOICE
-        await send_typing(update)
-        await update.message.reply_text(
-            f"✅ Đã điền {filled} fields\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return await _ask_for_state(update, context, next_state)
-
-    if intent == "skip" or text.lower() == "/skip":
-        brief.moodboard_notes = SKIP_SENTINEL  # mark as explicitly skipped
-    else:
-        brief.moodboard_notes = text
-    await send_typing(update)
+    # Jump to LOGO_INSPIRATION or next state
     await update.message.reply_text(
-        "📸 *Muốn upload ảnh moodboard không?*\n\n"
-        "Gửi ảnh vào \\(có thể gửi nhiều\\) — AI sẽ học từ visual references của bạn\\.\n\n"
-        "_Nhắn_ *xong* _khi đã gửi hết_  \\|  _hoặc_ *bỏ qua* _nếu không có_",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return MOODBOARD_IMAGES
-
-
-# ── Step 9: Moodboard Images ──────────────────────────────────────────────────
-
-async def step_moodboard_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle a general moodboard / aesthetic reference image."""
-    brief = get_brief(context)
-    idx = len(brief.moodboard_image_paths) + 1
-    img_path = await _download_image(update, context, "moodboard", idx)
-    if not img_path:
-        return MOODBOARD_IMAGES
-    brief.moodboard_image_paths.append(img_path)
-    await update.message.reply_text(
-        f"📸 Đã nhận ảnh \\#{idx}\\! Gửi tiếp, hoặc nhắn *xong* khi đã gửi hết\\.",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return MOODBOARD_IMAGES
-
-
-async def step_moodboard_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text messages in MOODBOARD_IMAGES state (e.g. 'xong', 'bỏ qua')."""
-    intent = detect_intent(update.message.text or "")
-    if intent == "done":
-        return await step_moodboard_done(update, context)
-    if intent == "skip":
-        return await step_moodboard_skip(update, context)
-    await update.message.reply_text(
-        "📸 Gửi ảnh vào để AI học từ visual references của bạn\\.\n"
-        "Nhắn *xong* khi đã gửi hết, hoặc *bỏ qua* nếu không có\\.  ",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return MOODBOARD_IMAGES
-
-
-async def step_moodboard_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User signals done uploading general moodboard images → ask for logo inspirations."""
-    brief = get_brief(context)
-    img_count = len(brief.moodboard_image_paths)
-    note = f"✅ Nhận {img_count} ảnh moodboard\\!" if img_count else "⏭ Bỏ qua ảnh moodboard\\."
-    await update.message.reply_text(
-        f"{note}\n\n"
         "🔤 *Bạn có ảnh logo nào muốn tham khảo không?*\n"
         "_\\(logo của brand khác mà bạn thích về phong cách, font, biểu tượng\\.\\.\\.\\)_\n\n"
         "_Gửi ảnh trực tiếp \\(hoặc dạng file\\) — có thể gửi nhiều_\n"
@@ -1202,17 +1098,7 @@ async def step_moodboard_done(update: Update, context: ContextTypes.DEFAULT_TYPE
     return LOGO_INSPIRATION
 
 
-async def step_moodboard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User skips general moodboard images → still ask for logo inspirations."""
-    await update.message.reply_text(
-        "⏭ Bỏ qua ảnh moodboard\\.\n\n"
-        "🔤 *Bạn có ảnh logo nào muốn tham khảo không?*\n"
-        "_\\(logo của brand khác mà bạn thích về phong cách, font, biểu tượng\\.\\.\\.\\)_\n\n"
-        "_Gửi ảnh trực tiếp \\(hoặc dạng file\\) — có thể gửi nhiều_\n"
-        "_Nhắn_ *xong* _khi đã gửi hết \\|_ *bỏ qua* _nếu không có_",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return LOGO_INSPIRATION
+
 
 
 # ── Step 9b: Logo Inspiration ─────────────────────────────────────────────────
@@ -1323,7 +1209,7 @@ async def step_pattern_inspiration_done(update: Update, context: ContextTypes.DE
 
     await update.message.reply_text(
         f"{note}{auto_full_note}\n\n"
-        "*Keywords thương hiệu?*\n"
+        "*3 \\- 5 tính từ miêu tả tính cách thương hiệu?*\n"
         "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
         "_ví dụ: minimal, trustworthy, precision_\n"
         "_Nhắn_ *bỏ qua* _nếu chưa có_",
@@ -1344,7 +1230,7 @@ async def step_pattern_inspiration_skip(update: Update, context: ContextTypes.DE
 
     await update.message.reply_text(
         f"⏭ Bỏ qua pattern refs\\.{auto_full_note}\n\n"
-        "*Keywords thương hiệu?*\n"
+        "*3 \\- 5 tính từ miêu tả tính cách thương hiệu?*\n"
         "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
         "_Nhắn_ *bỏ qua* _nếu chưa có_",
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -1447,6 +1333,195 @@ async def step_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ── Step 12: Confirm ──────────────────────────────────────────────────────────
 
+def _fetch_preview_refs(brief, n: int = 4) -> list:
+    """
+    Pull n diverse high-quality logo reference images for the preview step.
+    Returns list of Path objects. Falls back to empty list on any error.
+    """
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        project_root = _Path(__file__).parent.parent
+        refs_dir = project_root / "references" / "logos"
+        if not refs_dir.exists():
+            return []
+
+        kw = list(getattr(brief, "keywords", []) or [])
+        industry = getattr(brief, "industry", "") or ""
+        product  = getattr(brief, "product_service", "") or ""
+        kw_set = {w.lower() for w in (kw + industry.split() + product.split()) if w}
+
+        # Score every category dir
+        scored: list = []
+        for sub in sorted(refs_dir.iterdir()):
+            if not sub.is_dir() or not (sub / "index.json").exists():
+                continue
+            cat_words = set(sub.name.lower().replace("-", "_").split("_"))
+            cat_score = len(kw_set & cat_words)
+            try:
+                index = _json.loads((sub / "index.json").read_text())
+                for fname, entry in index.items():
+                    tags = entry.get("tags", {})
+                    all_tags: set = set()
+                    for lst_key in ("style", "industry", "mood", "technique"):
+                        for t in tags.get(lst_key, []):
+                            all_tags.update(t.lower().split())
+                    tag_overlap = len(kw_set & all_tags)
+                    quality     = tags.get("quality", 5)
+                    score       = cat_score * 2 + tag_overlap + quality / 10.0
+                    rel  = entry.get("relative_path", "")
+                    absp = entry.get("local_path", "")
+                    resolved = str(project_root / rel) if rel else absp
+                    if resolved and _Path(resolved).exists():
+                        scored.append((score, sub.name, _Path(resolved)))
+            except Exception:
+                continue
+
+        if not scored:
+            return []
+
+        scored.sort(key=lambda x: -x[0])
+
+        # Pick n diverse images (one per category as much as possible)
+        result: list = []
+        seen_cats: set = set()
+        # First pass: best per category
+        for score, cat, p in scored:
+            if cat not in seen_cats and len(result) < n:
+                result.append(p)
+                seen_cats.add(cat)
+        # Second pass: fill remaining slots with top scorers
+        for score, cat, p in scored:
+            if p not in result and len(result) < n:
+                result.append(p)
+
+        return result[:n]
+    except Exception:
+        return []
+
+
+async def step_ref_choice_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    After brief confirm → show 4 reference logo images and ask user to pick one
+    as visual anchor, or skip straight to generation.
+    Called from step_confirm_callback when user hits "Generate".
+    """
+    brief = get_brief(context)
+    refs  = _fetch_preview_refs(brief, n=4)
+
+    if not refs:
+        # No refs available → go straight to pipeline
+        return await _launch_pipeline(update, context)
+
+    # Store refs in context for the handler
+    context.user_data["preview_refs"] = [str(p) for p in refs]
+
+    # Send images as a group with captions
+    from telegram import InputMediaPhoto
+    media_group = []
+    for i, p in enumerate(refs, 1):
+        try:
+            media_group.append(
+                InputMediaPhoto(
+                    media=open(p, "rb"),
+                    caption=f"*{i}*" if i == 1 else str(i),
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+            )
+        except Exception:
+            pass
+
+    if media_group:
+        await context.bot.send_media_group(
+            chat_id=update.effective_chat.id,
+            media=media_group,
+        )
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🖼 {i}", callback_data=f"ref_{i}") for i in range(1, len(media_group) + 1)],
+        [InlineKeyboardButton("⚡ Bỏ qua, generate ngay", callback_data="ref_skip")],
+    ])
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "👆 *Đây là một số hướng visual tham khảo phù hợp với brief của bạn\\.*\n\n"
+            "Bấm số để chọn hướng bạn thích nhất \\(AI sẽ dùng làm anchor\\), "
+            "hoặc bỏ qua để AI tự quyết\\."
+        ),
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    return REF_CHOICE
+
+
+async def step_ref_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle user's ref choice (1-4) or skip."""
+    query = update.callback_query
+    await query.answer()
+    data  = query.data  # "ref_1" … "ref_4" or "ref_skip"
+
+    if data != "ref_skip":
+        idx = int(data.split("_")[1]) - 1
+        refs = context.user_data.get("preview_refs", [])
+        if 0 <= idx < len(refs):
+            chosen_path = refs[idx]
+            # Inject as priority moodboard image for the pipeline
+            brief = get_brief(context)
+            existing = list(getattr(brief, "moodboard_images", []) or [])
+            from pathlib import Path as _Path
+            existing.insert(0, _Path(chosen_path))   # highest priority
+            brief.moodboard_images = existing
+            await query.edit_message_text(
+                f"✅ Đã chọn hướng *{idx + 1}* làm visual anchor\\. Bắt đầu generate\\!",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        else:
+            await query.edit_message_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
+    else:
+        await query.edit_message_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
+
+    return await _launch_pipeline(update, context)
+
+
+async def _launch_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Common pipeline launch logic (extracted from step_confirm_callback)."""
+    brief   = get_brief(context)
+    chat_id = update.effective_chat.id
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+
+    if not api_key:
+        await context.bot.send_message(chat_id, "❌ GEMINI\\_API\\_KEY chưa được set\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return ConversationHandler.END
+
+    mode_label = "Full \\(4 directions\\)" if brief.mode == "full" else "Quick \\(2 directions\\)"
+    progress_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"⏳ *Đang khởi động pipeline\\.\\.\\.*\n\n"
+            f"Mode: {mode_label}\n"
+            f"Brand: *{escape_md(brief.brand_name)}*\n\n"
+            f"_Quá trình mất 3–12 phút tùy mode\\._"
+        ),
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+    context.user_data[MSG_ID_KEY] = progress_msg.message_id
+    brief_dir = brief.write_to_temp_dir()
+    context.user_data[TEMP_DIR_KEY] = str(brief_dir)
+
+    asyncio.create_task(
+        _run_pipeline_and_respond(
+            context=context,
+            chat_id=chat_id,
+            progress_msg_id=progress_msg.message_id,
+            brief=brief,
+            brief_dir=brief_dir,
+            api_key=api_key,
+        )
+    )
+    return ConversationHandler.END
+
+
 async def step_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -1465,44 +1540,9 @@ async def step_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return ConversationHandler.END
 
-    # confirm_go → start pipeline
-    brief = get_brief(context)
-    chat_id = update.effective_chat.id
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-
-    if not api_key:
-        await query.edit_message_text("❌ GEMINI_API_KEY chưa được set\\. Pipeline không thể chạy\\.", parse_mode=ParseMode.MARKDOWN_V2)
-        return ConversationHandler.END
-
-    # Send progress message
-    mode_label = "Full \\(4 directions\\)" if brief.mode == "full" else "Quick \\(2 directions\\)"
-    progress_msg = await query.edit_message_text(
-        f"⏳ *Đang khởi động pipeline\\.\\.\\.*\n\n"
-        f"Mode: {mode_label}\n"
-        f"Brand: *{escape_md(brief.brand_name)}*\n\n"
-        f"_Quá trình mất 3–12 phút tùy mode\\._",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-
-    context.user_data[MSG_ID_KEY] = progress_msg.message_id
-
-    # Write brief to temp dir
-    brief_dir = brief.write_to_temp_dir()
-    context.user_data[TEMP_DIR_KEY] = str(brief_dir)
-
-    # Kick off pipeline in background
-    asyncio.create_task(
-        _run_pipeline_and_respond(
-            context=context,
-            chat_id=chat_id,
-            progress_msg_id=progress_msg.message_id,
-            brief=brief,
-            brief_dir=brief_dir,
-            api_key=api_key,
-        )
-    )
-
-    return ConversationHandler.END
+    # confirm_go → show reference preview first
+    await query.edit_message_text("🔍 Đang tìm visual references\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+    return await step_ref_choice_show(update, context)
 
 
 # ── Pipeline execution + result delivery ──────────────────────────────────────
@@ -1519,10 +1559,7 @@ async def _run_pipeline_and_respond(
 
     def on_progress(msg: str) -> None:
         """Sync callback from pipeline thread → schedule async edit."""
-        asyncio.run_coroutine_threadsafe(
-            safe_edit(context, chat_id, progress_msg_id, msg),
-            asyncio.get_event_loop(),
-        )
+        asyncio.create_task(safe_edit(context, chat_id, progress_msg_id, msg))
 
     runner = PipelineRunner(api_key=api_key)
     result = await runner.run(
@@ -1751,19 +1788,7 @@ def build_app(token: str) -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_competitors),
                 CommandHandler("skip", step_competitors),
             ],
-            MOODBOARD_NOTES: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, step_moodboard_notes),
-                CommandHandler("skip", step_moodboard_notes),
-            ],
-            MOODBOARD_IMAGES: [
-                # Accept compressed photos AND images sent as files
-                MessageHandler(filters.PHOTO, step_moodboard_image),
-                MessageHandler(filters.Document.IMAGE, step_moodboard_image),
-                # Accept plain-text commands like "xong" / "bỏ qua"
-                MessageHandler(filters.TEXT & ~filters.COMMAND, step_moodboard_text),
-                CommandHandler("done", step_moodboard_done),
-                CommandHandler("skip", step_moodboard_skip),
-            ],
+
             LOGO_INSPIRATION: [
                 MessageHandler(filters.PHOTO, step_logo_inspiration_image),
                 MessageHandler(filters.Document.IMAGE, step_logo_inspiration_image),
@@ -1788,6 +1813,7 @@ def build_app(token: str) -> Application:
             ],
             MODE_CHOICE: [CallbackQueryHandler(step_mode_callback, pattern="^mode_")],
             CONFIRM:     [CallbackQueryHandler(step_confirm_callback, pattern="^confirm_")],
+            REF_CHOICE:  [CallbackQueryHandler(step_ref_choice_callback, pattern="^ref_")],
         },
         fallbacks=[
             CommandHandler("cancel", cmd_cancel),

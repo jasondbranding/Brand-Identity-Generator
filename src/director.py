@@ -268,6 +268,21 @@ Propose a deliberate balance between market recognition and designer instinct. B
 **Option 4 — Wild Card**
 Surprise. Break from the brief's explicit direction. Use your understanding of the product, audience, and cultural moment to propose an unexpected direction that might be exactly right. No moodboard constraint.
 
+## THE CARDINAL RULE OF CONCEPT QUALITY
+
+Before generating ANY visual spec, ask yourself: "Is this the first thing anyone would think of?"
+If yes — reject it and go deeper. The best logos do NOT show what the brand does. They show what it MEANS.
+
+A coffee brand should never show a coffee bean. A tech brand should never show a circuit board.
+A finance brand should never show an arrow going up. These are visual clichés — design's equivalent of a dead metaphor.
+
+Each of the 4 directions MUST explore a different conceptual territory. The logo_concept field
+must begin with: "Conceptual territory: [name]. Rationale: [why this, not the obvious thing]."
+
+If the user brief includes CREATIVE CONSTRAINTS (anti-cliché list + lateral territories),
+those are HARD RULES. Violating them = rejected output. Use the lateral territory list as
+your creative starting point, then push one level deeper.
+
 **For image specs — 3 structured JSON specs per direction:**
 
 Each spec has a strict schema. Fill every field with direction-specific, precise values.
@@ -400,6 +415,228 @@ announcement_copy — reads like a real tweet, 10–18 words
 """
 
 
+# ── Industry cliché + lateral territory database ──────────────────────────────
+# Each entry: industry keywords → what to avoid + creative territories to explore.
+# Injected into the Director prompt so AI is forced to think laterally.
+
+INDUSTRY_CLICHES: dict = {
+    "coffee": {
+        "avoid": [
+            "coffee beans", "coffee cup / mug", "steam swirls rising from cup",
+            "coffee plant or leaf", "roasting drum", "espresso dripping",
+            "sunrise over plantation",
+        ],
+        "lateral": [
+            "terroir — contour lines of highland geography",
+            "the ritual: the specific gesture of brewing (phin, pour-over, aeropress)",
+            "transformation — the moment green bean becomes roasted",
+            "origin story — hands of the farmer, soil texture",
+            "the pause — silence and slowness as a concept",
+            "cultural marker specific to origin (Vietnamese phin, Ethiopian ceremony, Italian bar)",
+            "typographic mark using brand initial with editorial weight",
+        ],
+    },
+    "tea": {
+        "avoid": [
+            "tea leaf", "teacup with saucer", "steam from teapot",
+            "teapot silhouette", "zen circle + tea drop",
+        ],
+        "lateral": [
+            "the steeping moment — suspension in water",
+            "garden topography / terraced hillside",
+            "whisking gesture (matcha)", "ceramic texture",
+            "the breath — stillness and ritual",
+        ],
+    },
+    "tech": {
+        "avoid": [
+            "circuit board / PCB traces", "binary code / 0s and 1s",
+            "lightbulb for ideas", "neural network node diagram",
+            "rocket ship", "wifi signal / connectivity arc",
+            "globe with latitude lines", "gear/cog",
+        ],
+        "lateral": [
+            "human behavior the product enables — not the product itself",
+            "invisible infrastructure made visible through abstraction",
+            "the moment of insight or clarity as negative space",
+            "architectural precision — grid, module, ratio",
+            "kinetic mark suggesting motion or process",
+            "typographic lettermark with custom constructed geometry",
+        ],
+    },
+    "food": {
+        "avoid": [
+            "fork and spoon crossed", "chef hat", "plate / bowl silhouette",
+            "fire / flame", "generic leaf or herb sprig", "smiling face",
+        ],
+        "lateral": [
+            "texture of the ingredient at macro scale",
+            "the process / craft: fermentation, fire, aging",
+            "cultural origin marker — geography, tradition",
+            "seasonal cycle — time as a visual concept",
+            "the moment before eating — anticipation",
+        ],
+    },
+    "finance": {
+        "avoid": [
+            "upward arrow / growth chart", "dollar sign / currency symbol",
+            "scales of balance", "handshake", "shield / crest",
+            "bar chart", "coins stacked",
+        ],
+        "lateral": [
+            "flow and momentum — abstract lines suggesting direction",
+            "architectural stability — column, vault, grid",
+            "precision geometry — constructed from ratio and proportion",
+            "quiet confidence — typographic mark, no icon",
+            "time and continuity — the long view as visual concept",
+        ],
+    },
+    "healthcare": {
+        "avoid": [
+            "red cross / plus sign", "EKG heartbeat line", "stethoscope",
+            "pill or capsule", "generic DNA helix", "caduceus",
+        ],
+        "lateral": [
+            "human touch — hand gesture, warmth",
+            "light and clarity — openness as trust",
+            "botanical precision — plant as healing without being literal",
+            "the breath — lungs, rhythm, life",
+            "typographic mark with humanist weight",
+        ],
+    },
+    "fashion": {
+        "avoid": [
+            "needle and thread", "mannequin silhouette", "clothes hanger",
+            "scissors", "sewing machine", "fabric draping generic",
+        ],
+        "lateral": [
+            "material texture at extreme close-up",
+            "the silhouette as pure geometric form",
+            "editorial negative space — what is NOT there",
+            "typographic statement — fashion house style",
+            "abstract gesture of movement",
+        ],
+    },
+    "real_estate": {
+        "avoid": [
+            "house / roof outline", "key silhouette", "front door",
+            "city skyline", "building facade", "location pin",
+        ],
+        "lateral": [
+            "threshold — the moment of transition between spaces",
+            "light through architecture — openings, planes",
+            "human scale — proportion, comfort",
+            "geometric construction — plan view abstracted",
+            "the view from inside looking out",
+        ],
+    },
+    "education": {
+        "avoid": [
+            "graduation cap", "open book", "pencil / pen",
+            "apple on desk", "lightbulb for ideas", "owl",
+        ],
+        "lateral": [
+            "curiosity as gesture — reaching, leaning forward",
+            "growth from inside — emergence, unfolding",
+            "connection between minds — abstract network",
+            "the question mark itself as a designed symbol",
+            "structure of knowledge — modular, layered",
+        ],
+    },
+    "wellness": {
+        "avoid": [
+            "lotus flower", "generic leaf", "sun / sunrise",
+            "circle with negative space (too common)", "water drop",
+        ],
+        "lateral": [
+            "breath and rhythm — wave, interval",
+            "body geometry — abstracted human form",
+            "the pause — stillness made visual",
+            "botanical detail at scientific precision",
+            "earth and material — texture, ground",
+        ],
+    },
+}
+
+# Keyword → industry mapping (brief keywords → which cliché list to pull)
+_INDUSTRY_KEYWORD_MAP: dict = {
+    "coffee": "coffee", "cafe": "coffee", "espresso": "coffee",
+    "matcha": "tea", "tea": "tea", "beverage": "coffee",
+    "tech": "tech", "saas": "tech", "software": "tech", "app": "tech",
+    "fintech": "finance", "crypto": "finance", "finance": "finance",
+    "food": "food", "restaurant": "food", "bakery": "food",
+    "health": "healthcare", "medical": "healthcare", "clinic": "healthcare",
+    "fashion": "fashion", "clothing": "fashion", "apparel": "fashion",
+    "real": "real_estate", "estate": "real_estate", "property": "real_estate",
+    "education": "education", "school": "education", "learning": "education",
+    "wellness": "wellness", "yoga": "wellness", "spa": "wellness",
+}
+
+
+def _build_concept_constraints(brief_text: str, brief_keywords: list) -> str:
+    """
+    Analyse brief to identify industry, then return a constraint block with:
+    - Clichés to AVOID (hard rule)
+    - Lateral territories to EXPLORE (creative direction)
+
+    This forces the Director to think beyond the obvious.
+    """
+    text_lower = (brief_text + " " + " ".join(brief_keywords or [])).lower()
+
+    # Find matching industries (may match more than one)
+    matched: dict = {}   # industry_key → cliché dict
+    for keyword, industry_key in _INDUSTRY_KEYWORD_MAP.items():
+        if keyword in text_lower and industry_key not in matched:
+            matched[industry_key] = INDUSTRY_CLICHES[industry_key]
+
+    if not matched:
+        return ""
+
+    lines = [
+        "## CREATIVE CONSTRAINTS — READ BEFORE GENERATING CONCEPTS",
+        "",
+        "Based on this brand's industry, a senior Art Director would immediately flag these",
+        "as OVERDONE and FORBIDDEN. Using any of these will result in a rejected concept.",
+        "",
+    ]
+
+    for industry_key, data in matched.items():
+        readable = industry_key.replace("_", " ").title()
+        avoid_str = " / ".join(data["avoid"])
+        lines.append(f"**{readable} — FORBIDDEN visuals:** {avoid_str}")
+
+    lines += [
+        "",
+        "## LATERAL TERRITORIES — explore these instead",
+        "Great logos do NOT show what the brand does. They show what it MEANS.",
+        "Each of the 4 directions must explore a DIFFERENT territory from this list",
+        "(or invent one equally unexpected). No two directions may use the same visual metaphor.",
+        "",
+    ]
+
+    for industry_key, data in matched.items():
+        readable = industry_key.replace("_", " ").title()
+        lines.append(f"**{readable} — creative territories:**")
+        for t in data["lateral"]:
+            lines.append(f"  • {t}")
+        lines.append("")
+
+    lines += [
+        "## THE 4-DIRECTION DIVERSITY RULE",
+        "Each option must use a DISTINCT conceptual territory:",
+        "  Option 1 (Market-Aligned)  → pick the most commercially proven lateral territory",
+        "  Option 2 (Designer-Led)    → pick the most aesthetically bold / unexpected territory",
+        "  Option 3 (Hybrid)          → combine two territories in one mark",
+        "  Option 4 (Wild Card)       → the territory nobody would think of — but is exactly right",
+        "",
+        "Before writing the logo_spec for each direction, state in logo_concept:",
+        "  'Conceptual territory: [name it]. Why it works: [one sentence rationale].'",
+        "  This ensures the concept is chosen deliberately, not by default.",
+    ]
+
+    return "\n".join(lines)
+
+
 # ── Director function ─────────────────────────────────────────────────────────
 
 def generate_directions(
@@ -424,6 +661,14 @@ def generate_directions(
 
     if research_context:
         user_message += f"\n\n---\n\n{research_context}"
+
+    # ── Inject anti-cliché + lateral territory constraints ────────────────────
+    brief_kw = list(getattr(brief, "keywords", []) or [])
+    brief_txt = getattr(brief, "raw_text", "") or user_message
+    concept_constraints = _build_concept_constraints(brief_txt, brief_kw)
+    if concept_constraints:
+        user_message += f"\n\n---\n\n{concept_constraints}"
+        console.print("  [dim]concept constraints injected (anti-cliché + lateral territories)[/dim]")
 
     if refinement_feedback:
         user_message += (
