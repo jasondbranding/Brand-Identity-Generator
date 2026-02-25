@@ -20,7 +20,7 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from rich.console import Console
 
@@ -28,6 +28,92 @@ from google import genai
 from google.genai import types
 
 console = Console()
+
+
+# ── Copy fallback generator ────────────────────────────────────────────────────
+
+def _generate_copy_from_brief(
+    brand_name: str,
+    brief_text: str,
+    direction_name: str,
+    direction_rationale: str,
+    direction_style: str,
+    primary_hex: str,
+) -> Tuple[str, str, str]:
+    """
+    Call Gemini (text-only) to generate tagline / ad_slogan / announcement_copy
+    grounded in the full brief context + this direction's concept.
+
+    Returns (tagline, ad_slogan, announcement_copy) — all non-empty strings.
+    Falls back to safe defaults on any error.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return (
+            f"{brand_name} — built different.",
+            "Built different.",
+            f"{brand_name} is here. Something worth paying attention to.",
+        )
+
+    prompt = f"""You are a senior copywriter. Generate 3 copy assets for a brand.
+
+BRAND: {brand_name}
+DIRECTION: {direction_name}
+RATIONALE: {direction_rationale}
+VISUAL STYLE: {direction_style}
+PRIMARY COLOR: {primary_hex}
+
+BRIEF CONTEXT:
+{brief_text.strip()[:1500]}
+
+Output ONLY valid JSON with these 3 keys — no explanation, no markdown:
+{{
+  "tagline": "5–10 words. Memorable brand promise that fits this direction's personality.",
+  "ad_slogan": "3–6 words. Punchy, bold, could be a billboard. Imperative or evocative.",
+  "announcement_copy": "10–18 words. Sounds like a real tweet announcing this brand — exciting, human, specific."
+}}"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        for model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.8,
+                        max_output_tokens=256,
+                    ),
+                )
+                raw = response.text.strip()
+                # Strip markdown code fences if present
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                data = json.loads(raw.strip())
+                tagline           = str(data.get("tagline", "")).strip()
+                ad_slogan         = str(data.get("ad_slogan", "")).strip()
+                announcement_copy = str(data.get("announcement_copy", "")).strip()
+                if tagline and ad_slogan and announcement_copy:
+                    console.print(
+                        f"  [dim]copy generated via {model} for '{direction_name}'[/dim]"
+                    )
+                    return tagline, ad_slogan, announcement_copy
+                break
+            except Exception as _me:
+                if any(k in str(_me).lower() for k in ("not found", "invalid")):
+                    continue
+                raise
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Copy generation failed ({e}) — using defaults[/yellow]")
+
+    # Safe defaults
+    return (
+        f"{brand_name} — {direction_name.lower()}.",
+        "Make it matter.",
+        f"{brand_name} is live. A new direction worth following.",
+    )
 
 # ── Canvas spec ───────────────────────────────────────────────────────────────
 POST_W, POST_H = 1920, 1080   # 16:9 at 1080p
@@ -351,30 +437,66 @@ def generate_social_posts(assets_map: dict) -> dict:
         secondary_hex = next((c.hex for c in direction.colors if c.role == "secondary"), "#666666")
         accent_hex    = next((c.hex for c in direction.colors if c.role == "accent"),    "#999999")
 
-        # Copy text map — brief copy takes priority over AI-generated direction copy
-        # Priority: brief (locked) → direction AI-generated → fallback default
+        # ── Resolve copy — 3-level priority ──────────────────────────────────
+        # 1. Brief copy (locked by client) — verbatim, same across all directions
+        # 2. AI-generated copy from BrandDirection (direction-specific, by Claude)
+        # 3. Fallback: generate fresh from brief context via Gemini text call
+        _brief_tagline      = getattr(assets, "brief_tagline", "")
+        _brief_slogan       = getattr(assets, "brief_ad_slogan", "")
         _brief_announcement = getattr(assets, "brief_announcement_copy", "")
-        _brief_slogan        = getattr(assets, "brief_ad_slogan", "")
+
+        _dir_tagline      = getattr(direction, "tagline", "")
+        _dir_slogan       = getattr(direction, "ad_slogan", "")
+        _dir_announcement = getattr(direction, "announcement_copy", "")
+
+        # Resolve each field
+        _tagline      = _brief_tagline      or _dir_tagline
+        _slogan       = _brief_slogan       or _dir_slogan
+        _announcement = _brief_announcement or _dir_announcement
+
+        # Level 3 fallback: if any field still empty, generate from brief context
+        if not (_tagline and _slogan and _announcement):
+            console.print(f"  [dim]copy fields missing — generating from brief context...[/dim]")
+            brief_text  = getattr(assets, "_brief_text", "")          # set below if available
+            _gen_tag, _gen_slo, _gen_ann = _generate_copy_from_brief(
+                brand_name=brand_name,
+                brief_text=brief_text,
+                direction_name=direction.direction_name,
+                direction_rationale=getattr(direction, "rationale", ""),
+                direction_style=getattr(direction, "graphic_style", ""),
+                primary_hex=primary_hex,
+            )
+            _tagline      = _tagline      or _gen_tag
+            _slogan       = _slogan       or _gen_slo
+            _announcement = _announcement or _gen_ann
+
+        # Log copy source
+        if _brief_tagline:
+            console.print(f"  [dim]tagline: brief (locked) → \"{_tagline}\"[/dim]")
+        elif _dir_tagline:
+            console.print(f"  [dim]tagline: AI direction → \"{_tagline}\"[/dim]")
+        else:
+            console.print(f"  [dim]tagline: generated → \"{_tagline}\"[/dim]")
+
+        if _brief_slogan:
+            console.print(f"  [dim]slogan: brief (locked) → \"{_slogan}\"[/dim]")
+        elif _dir_slogan:
+            console.print(f"  [dim]slogan: AI direction → \"{_slogan}\"[/dim]")
+        else:
+            console.print(f"  [dim]slogan: generated → \"{_slogan}\"[/dim]")
+
+        if _brief_announcement:
+            console.print(f"  [dim]announcement: brief (locked)[/dim]")
+        elif _dir_announcement:
+            console.print(f"  [dim]announcement: AI direction[/dim]")
+        else:
+            console.print(f"  [dim]announcement: generated[/dim]")
 
         copy_map = {
-            "collab_post":        "",   # no copy for collab — visual only
-            "announcement_post":  (
-                _brief_announcement                             # 1st: brief (locked)
-                or getattr(direction, "announcement_copy", "") # 2nd: AI-generated per direction
-                or f"Something new from {brand_name}."         # 3rd: fallback
-            ),
-            "ads_post": (
-                _brief_slogan                                   # 1st: brief (locked)
-                or getattr(direction, "ad_slogan", "")          # 2nd: AI-generated per direction
-                or brand_name                                   # 3rd: fallback
-            ),
+            "collab_post":        "",             # no copy for collab — visual only
+            "announcement_post":  _announcement,
+            "ads_post":           _slogan,
         }
-
-        # Log copy source for transparency
-        if _brief_announcement:
-            console.print(f"  [dim]announcement copy: using brief copy (locked)[/dim]")
-        if _brief_slogan:
-            console.print(f"  [dim]ad slogan: using brief copy (locked)[/dim]")
 
         # Logo to use (prefer transparent, fall back to regular logo)
         logo_path = assets.logo_transparent or assets.logo

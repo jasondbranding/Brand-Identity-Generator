@@ -345,6 +345,7 @@ def refinement_loop(
                     brief_tagline=brief.tagline,
                     brief_ad_slogan=brief.ad_slogan,
                     brief_announcement_copy=brief.announcement_copy,
+                    brief_text=brief.brief_text,
                 )
                 console.print(f"  [green]✓ Images in {time.time() - t1:.1f}s[/green]")
 
@@ -448,6 +449,7 @@ def main() -> None:
             brief_tagline=brief.tagline,
             brief_ad_slogan=brief.ad_slogan,
             brief_announcement_copy=brief.announcement_copy,
+            brief_text=brief.brief_text,
         )
         console.print(f"\n  [green]✓ {sum(1 for a in all_assets.values() if a.background)} background(s), "
                       f"{sum(1 for a in all_assets.values() if a.logo)} logo(s), "

@@ -46,6 +46,9 @@ class DirectionAssets:
     brief_ad_slogan: str = ""           # from "## Slogan" / "## Ad Slogan" in brief.md
     brief_announcement_copy: str = ""   # from "## Announcement" in brief.md
 
+    # Full brief text — used by copy fallback generator if direction copy fields are empty
+    _brief_text: str = ""
+
 
 def generate_all_assets(
     directions: list,
@@ -55,6 +58,7 @@ def generate_all_assets(
     brief_tagline: str = "",
     brief_ad_slogan: str = "",
     brief_announcement_copy: str = "",
+    brief_text: str = "",
 ) -> dict:
     """
     Generate bg + logo + pattern for every direction.
@@ -67,6 +71,7 @@ def generate_all_assets(
         brief_tagline:           Pre-written tagline from brief (overrides AI-generated)
         brief_ad_slogan:         Pre-written ad slogan from brief (overrides AI-generated)
         brief_announcement_copy: Pre-written announcement copy from brief (overrides AI-generated)
+        brief_text:              Full raw brief text — used for copy fallback generation
 
     Returns:
         Dict mapping option_number → DirectionAssets
@@ -86,6 +91,7 @@ def generate_all_assets(
             brief_tagline=brief_tagline,
             brief_ad_slogan=brief_ad_slogan,
             brief_announcement_copy=brief_announcement_copy,
+            brief_text=brief_text,
         )
         results[direction.option_number] = assets
 
@@ -100,6 +106,7 @@ def _generate_direction_assets(
     brief_tagline: str = "",
     brief_ad_slogan: str = "",
     brief_announcement_copy: str = "",
+    brief_text: str = "",
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
@@ -144,6 +151,7 @@ def _generate_direction_assets(
         brief_tagline=brief_tagline,
         brief_ad_slogan=brief_ad_slogan,
         brief_announcement_copy=brief_announcement_copy,
+        _brief_text=brief_text,
     )
 
 

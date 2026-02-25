@@ -100,26 +100,30 @@ class BrandDirection(BaseModel):
         )
     )
     tagline: str = Field(
-        default="",
         description=(
             "Brand tagline — 5 to 10 words, memorable and on-brand. "
-            "Captures the brand's core promise or personality. "
+            "REQUIRED — must not be empty. "
+            "If brief provides a locked tagline, use it verbatim. Otherwise generate one that captures "
+            "this direction's core promise and personality. "
             "Example: 'Where every market tells a story.' or 'Built for those who move first.'"
         )
     )
     ad_slogan: str = Field(
-        default="",
         description=(
             "Short punchy ad slogan — 3 to 6 words, bold and action-oriented. "
-            "Used as the hero text on ad posts. "
+            "REQUIRED — must not be empty. "
+            "If brief provides a locked slogan, use it verbatim. Otherwise generate one that fits "
+            "this direction's visual energy. Used as the large hero text on ad posts. "
             "Example: 'Trade smarter. Live bolder.' or 'Fresh finds. Bold moves.'"
         )
     )
     announcement_copy: str = Field(
-        default="",
         description=(
             "Announcement post body text — 10 to 18 words, brand voice tone. "
-            "Sounds like an exciting brand announcement on X/Twitter. "
+            "REQUIRED — must not be empty. "
+            "If brief provides locked announcement copy, use it verbatim. Otherwise write something "
+            "that sounds like an exciting brand announcement on X/Twitter — human, slightly cryptic, "
+            "specific to this direction's concept. "
             "Example: 'Something new is here. Discover the market experience you've been waiting for.' "
             "or 'We're redefining what it means to build in public. Stay close.'"
         )
