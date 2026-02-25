@@ -42,31 +42,41 @@ class ColorSwatch(BaseModel):
 
 class LogoSpec(BaseModel):
     """Structured render specification for the logo mark. Translated to a natural language prompt by the generator."""
-    logo_type: Literal["symbol", "abstract_mark", "lettermark"] = Field(
+    logo_type: Literal["symbol", "abstract_mark", "lettermark", "logotype", "combination"] = Field(
         description=(
-            "Type of mark to generate. "
-            "'symbol' = recognizable icon form (leaf, wave, bean, mountain). "
-            "'abstract_mark' = non-representational geometric / organic form. "
-            "'lettermark' = a single stylised letter with no full words. "
-            "NEVER use 'wordmark' or 'combination mark' — text is forbidden in logo output."
+            "Type of mark to generate. Choose based on what best serves the brand:\n"
+            "  'symbol'       — recognizable icon form (leaf, wave, coffee bean, mountain). No text at all.\n"
+            "  'abstract_mark'— non-representational geometric/organic form. No text at all.\n"
+            "  'lettermark'   — single stylised letter, highly crafted. No full words.\n"
+            "  'logotype'     — brand name as pure typographic treatment. The type IS the logo.\n"
+            "                   Use when typography is the brand's primary visual identity.\n"
+            "  'combination'  — symbol/mark PLUS brand name text, composed together as a unit.\n"
+            "                   Use when name recognition is critical (new brand, complex name).\n"
+            "⚠ For logotype and combination: text IS allowed — but ONLY the brand name, rendered as type."
         )
     )
     form: str = Field(
         description=(
-            "Exact geometric description of the mark. Use precise language: shape primitives, "
-            "dimensions, proportions, angles. "
-            "GOOD: 'two concentric circles, outer 80% canvas width, inner 50%, both 4px stroke'. "
-            "BAD: 'a circular mark suggesting infinity'."
+            "Exact visual description of the mark. Be precise with geometry, dimensions, weight:\n"
+            "  For symbol/abstract_mark: shape primitives, px dimensions, angles, stroke weights.\n"
+            "    GOOD: 'two concentric arcs, outer 48px radius 5px stroke, inner 28px radius 3px stroke, open at 7 o'clock'\n"
+            "    BAD:  'a circular mark suggesting infinity'\n"
+            "  For lettermark: exact letter, weight, stylisation treatment.\n"
+            "    GOOD: 'uppercase M, custom serif, 72pt, vertically mirrored at the baseline creating a reflection'\n"
+            "  For logotype: typeface style, weight, any custom letterform treatment.\n"
+            "    GOOD: 'brand name in condensed geometric sans-serif, all-caps, extra-bold, 5% tracked, baseline perfectly aligned'\n"
+            "  For combination: describe symbol AND its spatial relationship to the type.\n"
+            "    GOOD: 'small leaf symbol 24px to the left of the brand name, vertically centered, 8px gap between mark and type'"
         )
     )
     composition: str = Field(
-        description="Positioning and canvas rules. E.g. 'centered, 20% padding all sides, 800×800px canvas, pure white #FFFFFF background'."
+        description="Canvas rules. E.g. 'centered, 20% padding all sides, 800×800px canvas, pure white #FFFFFF background'. For combination/logotype: specify horizontal or stacked layout."
     )
     color_hex: str = Field(
         description=(
             "EXACTLY ONE hex color code from the palette. "
-            "⚠ MONOCHROME RULE: the logo mark uses ONE color only — no gradients, "
-            "no second color, no tints. Choose the primary palette color."
+            "⚠ MONOCHROME RULE: all logo types use ONE color only — symbol, type, and all elements "
+            "share the same single color. No gradients, no second color, no tints."
         )
     )
     color_name: str = Field(
@@ -74,22 +84,41 @@ class LogoSpec(BaseModel):
     )
     fill_style: Literal["solid_fill", "outline_only", "fill_with_outline_detail"] = Field(
         description=(
-            "'solid_fill' = entire mark is a flat filled shape. "
-            "'outline_only' = stroke only, transparent interior. "
-            "'fill_with_outline_detail' = solid fill body with additional outline/cutout elements."
+            "'solid_fill' = entire mark/type is flat filled. "
+            "'outline_only' = stroke only, transparent interior (works well for symbols). "
+            "'fill_with_outline_detail' = solid fill with additional outline or cutout elements."
         )
     )
     stroke_weight: str = Field(
         description="Stroke weight if outline is involved. E.g. '3px', 'hairline 1px', 'bold 6px'. Use 'N/A' for pure solid fill."
     )
+    typography_treatment: str = Field(
+        description=(
+            "REQUIRED for logotype and combination. Describe the typeface and any custom treatment:\n"
+            "  GOOD: 'condensed geometric sans-serif similar to Futura, all-caps, extra-bold weight, "
+            "5% letter-spacing, custom ink-trap detail on the corners'\n"
+            "  For symbol/abstract_mark/lettermark: set to 'N/A'."
+        )
+    )
     render_style: str = Field(
         description="Visual rendering approach. E.g. 'clean flat vector', 'precise geometric construction', 'organic hand-crafted line'. Never gradient, never 3D unless specified."
     )
     metaphor: str = Field(
-        description="What the mark visually suggests or evokes. E.g. 'suggests a coffee bean split open to reveal a mountain contour'. Use 'abstract' if purely geometric with no representational intent."
+        description=(
+            "For symbol/abstract_mark/combination: what the mark visually suggests or evokes. "
+            "E.g. 'coffee bean cross-section revealing a mountain ridge — dual reading of origin and harvest'. "
+            "For logotype: describe the typographic personality. "
+            "Use 'abstract' if purely geometric with no representational intent."
+        )
     )
     avoid: List[str] = Field(
-        description="Explicit exclusion list. Always include: 'text', 'letterforms', 'words', 'gradient', 'drop shadow', 'multiple colors', 'photography'."
+        description=(
+            "Explicit exclusion list. "
+            "For symbol/abstract_mark/lettermark — always include: 'text', 'letterforms', 'words', 'gradient', 'drop shadow', 'multiple colors', 'photography'. "
+            "For logotype — include: 'symbols', 'icons', 'decorative elements', 'gradient', 'drop shadow', 'multiple colors'. "
+            "For combination — include: 'gradient', 'drop shadow', 'multiple colors', 'decorative frames'. "
+            "Never include 'text' in the avoid list for logotype or combination."
+        )
     )
 
 
@@ -251,17 +280,44 @@ background_spec: Atmospheric brand world image (16:9 cinematic).
 - lighting: be exact — "soft diffused fog light" not "nice light"
 - mood: 2–4 words that capture the emotional register
 
-logo_spec: The brand mark — symbol only, monochrome, no text.
-⚠ CRITICAL LOGO RULES:
-  1. color_hex = EXACTLY ONE hex code — the logo is ALWAYS monochrome (single color)
-  2. logo_type must be 'symbol', 'abstract_mark', or 'lettermark' — NEVER a wordmark
-  3. form = precise geometry — e.g. "equilateral triangle 72px per side, 6px rounded corners, centered axis at 15° tilt"
-  4. metaphor = what the form evokes (e.g. "coffee bean cross-section revealing a mountain ridge")
-  5. avoid must include: "text", "letterforms", "words", "gradient", "drop shadow", "multiple colors"
+logo_spec: The brand mark — monochrome (1 color), specific form, strategic type choice.
 
-Good logo_spec form examples:
-  GOOD: "two concentric arcs, outer radius 48px stroke 5px, inner radius 28px stroke 3px, open at bottom-right, suggesting a coffee bean in cross-section"
-  BAD: "a circular mark evoking the brand values"
+⚠ CRITICAL: color_hex = EXACTLY ONE hex code. ALL logo types are monochrome.
+   No gradients, no second color — this applies to symbol, logotype, AND combination.
+
+LOGO TYPE SELECTION — choose based on what fits the brand strategy:
+  'symbol' or 'abstract_mark' — when the visual mark can carry meaning alone.
+    Use for: brands with short memorable names, brands in visual-heavy categories (food, fashion),
+    brands wanting international recognition, or when moodboard shows icon-first identity.
+    ⚠ No text anywhere — avoid list MUST include "text", "letterforms", "words"
+
+  'lettermark' — when a single initial is enough to distinguish the brand.
+    Use for: monogram-style identity, luxury/heritage positioning.
+    ⚠ Single letter only — avoid list MUST include "text", "words"
+
+  'logotype' — when the brand NAME is the primary visual asset.
+    Use for: brands where name recognition is critical, short punchy brand names that look
+    great as type (e.g. "MINH", "APEX"), typographically-led moodboards.
+    ✓ Text IS the logo — describe typeface, weight, tracking, any custom letterform treatment.
+    ⚠ avoid list must NOT include "text" — DO include "symbols", "decorative elements"
+
+  'combination' — symbol + name text composed as a unit.
+    Use for: new brands that need name recognition, brands in categories where combination
+    marks are the norm (food/beverage, consumer brands, retail), complex or unfamiliar names.
+    ✓ Text IS part of the mark — describe both the symbol and its spatial relationship to the type.
+    ⚠ avoid list must NOT include "text" — DO include "gradient", "drop shadow"
+
+typography_treatment field:
+  REQUIRED for logotype and combination. Describe typeface character + any custom treatment.
+  GOOD: "condensed geometric sans-serif, all-caps extra-bold, 6% letter-spacing, brand name only"
+  BAD: "a nice clean font"
+  Set to "N/A" for symbol/abstract_mark/lettermark.
+
+Good logo_spec form examples by type:
+  symbol:      "two concentric arcs, outer 48px radius 5px stroke, inner 28px radius 3px stroke, open at 7 o'clock position"
+  logotype:    "brand name in condensed neo-grotesque sans-serif, all-caps, bold 700 weight, perfectly even baseline"
+  combination: "24px rounded-square icon to the left, 8px gap, brand name in medium-weight humanist sans-serif beside it"
+  BAD:         "a circular mark evoking the brand values"
 
 pattern_spec: Repeating seamless surface tile.
 - motif: name the element type precisely

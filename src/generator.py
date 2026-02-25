@@ -199,48 +199,90 @@ Example output: ["saas", "tech", "startup", "minimal", "geometric", "confident",
 def _logo_spec_to_prompt(spec) -> str:
     """Translate a LogoSpec (Pydantic model or dict) to a natural language image prompt.
 
-    Logo generation always uses exactly ONE color (monochrome rule).
-    The resulting prompt is passed directly to the image model.
+    All logo types use ONE color (monochrome rule).
+    For logotype / combination: text IS part of the mark — no text-ban clause.
+    For symbol / abstract_mark / lettermark: text is forbidden.
     """
     d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     if not d:
         return str(spec)
 
-    logo_type    = d.get("logo_type", "abstract_mark").replace("_", " ")
-    form         = d.get("form", "")
-    composition  = d.get("composition", "centered, 20% padding all sides, pure white background")
-    color_hex    = d.get("color_hex", "#1A1A1A")
-    color_name   = d.get("color_name", "")
-    fill_style   = d.get("fill_style", "solid_fill")
-    stroke_wt    = d.get("stroke_weight", "N/A")
-    render_style = d.get("render_style", "clean flat vector")
-    metaphor     = d.get("metaphor", "")
-    avoid        = d.get("avoid", ["text", "letterforms", "gradient", "drop shadow", "multiple colors"])
+    logo_type_raw  = d.get("logo_type", "abstract_mark")
+    logo_type      = logo_type_raw.replace("_", " ")
+    form           = d.get("form", "")
+    composition    = d.get("composition", "centered, 20% padding all sides, pure white background")
+    color_hex      = d.get("color_hex", "#1A1A1A")
+    color_name     = d.get("color_name", "")
+    fill_style     = d.get("fill_style", "solid_fill")
+    stroke_wt      = d.get("stroke_weight", "N/A")
+    typo_treatment = d.get("typography_treatment", "")
+    render_style   = d.get("render_style", "clean flat vector")
+    metaphor       = d.get("metaphor", "")
+    avoid          = d.get("avoid", [])
 
     color_label = f"{color_name} {color_hex}".strip()
 
     fill_desc = {
-        "solid_fill":              f"solid flat fill in {color_label}",
-        "outline_only":            f"outline only in {color_label}, {stroke_wt} stroke weight, transparent interior",
+        "solid_fill":               f"solid flat fill in {color_label}",
+        "outline_only":             f"outline only in {color_label}, {stroke_wt} stroke weight, transparent interior",
         "fill_with_outline_detail": f"solid fill in {color_label} with fine {stroke_wt} outline detail elements",
     }.get(fill_style, f"filled in {color_label}")
 
-    metaphor_clause = f" The form evokes {metaphor}." if metaphor and metaphor.lower() not in ("", "abstract", "n/a") else ""
-    avoid_str = ", ".join(avoid)
+    metaphor_clause = (
+        f" The form evokes {metaphor}."
+        if metaphor and metaphor.lower() not in ("", "abstract", "n/a") else ""
+    )
+
+    # ── Type-specific text handling ───────────────────────────────────────────
+    TEXT_ALLOWED_TYPES = ("logotype", "combination")
+    is_text_type = logo_type_raw in TEXT_ALLOWED_TYPES
+
+    # Build avoid list — never put "text"/"letterforms" in avoid for logotype/combination
+    avoid_items = [a for a in avoid if a]
+    if not is_text_type:
+        # Ensure icon-only types always ban text even if Director forgot
+        text_bans = {"text", "letterforms", "words"}
+        current_lower = " ".join(avoid_items).lower()
+        for ban in text_bans:
+            if ban not in current_lower:
+                avoid_items.insert(0, ban)
+    avoid_str = ", ".join(avoid_items) if avoid_items else "gradient, drop shadow, multiple colors"
+
+    # ── Type-specific subject preamble ────────────────────────────────────────
+    typo_clause = (
+        f" Typography treatment: {typo_treatment}."
+        if typo_treatment and typo_treatment.lower() not in ("", "n/a") else ""
+    )
+
+    if logo_type_raw == "logotype":
+        subject = f"A brand logotype — the brand name rendered as pure typography: {form}.{typo_clause}"
+    elif logo_type_raw == "combination":
+        subject = f"A combination mark logo (symbol and brand name composed as one unit): {form}.{typo_clause}"
+    else:
+        subject = f"A single {logo_type} logo mark: {form}."
+
+    # ── No-text enforcement (only for icon types) ────────────────────────────
+    text_rule = (
+        ""
+        if is_text_type
+        else " Absolutely no text, words, letterforms, or typography anywhere in the image."
+    )
 
     return (
-        # 1. Subject + form
-        f"A single {logo_type} logo mark: {form}. "
+        # 1. Subject + form + typography
+        f"{subject} "
         # 2. Composition
         f"Composition: {composition}, pure white (#FFFFFF) background. "
-        # 3. Color — monochrome
+        # 3. Color — always monochrome regardless of logo type
         f"Color: {fill_desc}. Strictly monochrome — one color only, no gradients, no tints, no second color. "
         # 4. Style + metaphor
         f"Visual style: {render_style}.{metaphor_clause} "
         # 5. Render quality
-        "Crisp vector-like edges, high contrast, scalable from 16px favicon to billboard. "
-        # 6. Avoids
-        f"Absolutely no: {avoid_str}."
+        "Crisp vector-like edges, high contrast, professional logo quality, scalable from 16px favicon to billboard. "
+        # 6. Text rule (icon types only)
+        + text_rule
+        # 7. Specific avoids
+        + f" Avoid: {avoid_str}."
     )
 
 
@@ -365,8 +407,20 @@ def _generate_direction_assets(
     logo_prompt    = _get_prompt("logo_spec",        "logo_prompt",       _logo_spec_to_prompt)
     pattern_prompt = _get_prompt("pattern_spec",     "pattern_prompt",    _pattern_spec_to_prompt)
 
-    # Log the translated prompts for debugging
-    console.print(f"  [dim]logo prompt ({len(logo_prompt)} chars): {logo_prompt[:120]}…[/dim]")
+    # Detect whether logo type allows text (logotype / combination)
+    _logo_spec_obj = getattr(direction, "logo_spec", None)
+    _logo_type_raw = (
+        _logo_spec_obj.logo_type
+        if _logo_spec_obj and hasattr(_logo_spec_obj, "logo_type")
+        else ""
+    )
+    _logo_text_allowed = _logo_type_raw in ("logotype", "combination")
+
+    # Log the translated prompt for debugging
+    console.print(
+        f"  [dim]logo ({_logo_type_raw or 'legacy'}, {'text OK' if _logo_text_allowed else 'no text'}) "
+        f"prompt: {logo_prompt[:100]}…[/dim]"
+    )
 
     background = _generate_image(
         prompt=bg_prompt,
@@ -382,6 +436,7 @@ def _generate_direction_assets(
         size_hint="square format, centered mark, generous white space around it",
         brief_keywords=effective_keywords,
         moodboard_images=moodboard_images,
+        logo_text_allowed=_logo_text_allowed,
     )
 
     pattern = _generate_image(
@@ -518,6 +573,7 @@ def _generate_image(
     size_hint: str,
     brief_keywords: Optional[list] = None,
     moodboard_images: Optional[list] = None,
+    logo_text_allowed: bool = False,
 ) -> Optional[Path]:
     """
     Try Imagen 3 first, then Gemini multimodal as fallback.
@@ -551,15 +607,22 @@ def _generate_image(
             console.print(f"  [dim]style guide injected for {label}[/dim]")
 
     if label == "logo":
+        # Text rule depends on logo type (logotype/combination = text allowed)
+        text_req = (
+            "- Brand name text is the intended output — render it with typographic precision\n"
+            "- No decorative elements, frames, or abstract symbols unless specified in the prompt\n"
+            if logo_text_allowed else
+            "- Absolutely no text, words, letters, or typography anywhere in the image\n"
+            "- Single iconic mark/symbol only — no letterforms of any kind\n"
+        )
         full_prompt = (
             f"{prompt}{style_guide_block}\n\n"
             "Technical requirements:\n"
-            "- Single iconic mark/symbol centered on pure white background\n"
+            + text_req +
             "- High contrast, clean crisp edges, professional vector quality\n"
             "- Suitable for brand identity at any scale (favicon to billboard)\n"
             "- Square format, generous padding (20%+ whitespace all sides)\n"
-            "- Absolutely no text, words, letters, or typography anywhere in the image\n"
-            "- Clean vector-like rendering, minimal complexity, bold and memorable\n"
+            "- Clean vector-like rendering, bold and memorable\n"
             "- The mark must be immediately recognizable and reproducible at small sizes"
         )
     elif label == "pattern":
