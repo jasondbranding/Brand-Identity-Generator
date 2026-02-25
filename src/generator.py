@@ -708,34 +708,110 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: 
         if not all_scored:
             return []
 
-        # ── Build result with cross-category diversity guarantee ───────────
-        # Step 1: one best image from each relevant category (score > 0), up to top_n
-        relevant_cats = [
-            (score, name) for name, (score, _) in cat_best.items() if score > 0
-        ]
-        relevant_cats.sort(key=lambda x: -x[0])
+        # ── Tiered slot allocation ─────────────────────────────────────────
+        #
+        # Tier 1 PRIMARY   — score >= max_score * 0.5  (core industry + style match)
+        #   → proportional slots (60% of budget), minimum 2 images each
+        # Tier 2 SECONDARY — score >= 1.0 but below primary gate
+        #   → 1-2 images each (up to 30% of budget)
+        # Tier 3 FILL      — score = 0, but individual image has strong tag overlap
+        #   → only fills remaining slots, minimum tag_overlap threshold
+        #
+        # This ensures e.g. "Coffee brand" → industry_food_beverage gets 5-6 images,
+        # style_minimal_geometric gets 3-4, while industry_education_edtech gets 0.
 
-        result: list   = []
-        used_cats: set = set()
+        # cat_score lookup: category-level keyword match score (name → cat_score)
+        cat_score_map = {cn: cs for _, cs, cn in index_dirs}
 
-        for _, cat_name in relevant_cats[:top_n]:
-            _, p = cat_best[cat_name]
-            result.append(p)
-            used_cats.add(cat_name)
-            if len(result) >= top_n:
+        max_cat_score = max(cat_score_map.values(), default=0.0)
+
+        # Tiers based on CATEGORY keyword overlap (not individual image score)
+        # PRIMARY   — folder name matches ≥50% of max category score (at least 2.0)
+        # SECONDARY — folder name has any keyword match (cat_score >= 1.0)
+        # EXCLUDED  — folder name has zero keyword overlap (cat_score = 0)
+        PRIMARY_GATE   = max(2.0, max_cat_score * 0.5)
+        SECONDARY_GATE = 1.0
+        FILL_MIN_TAGS  = 2     # fill-in images must have ≥2 tag overlaps with brief
+
+        primary_cats   = {n: (s, p) for n, (s, p) in cat_best.items()
+                          if cat_score_map.get(n, 0) >= PRIMARY_GATE}
+        secondary_cats = {n: (s, p) for n, (s, p) in cat_best.items()
+                          if SECONDARY_GATE <= cat_score_map.get(n, 0) < PRIMARY_GATE}
+
+        primary_budget   = round(top_n * 0.60)   # 9 of 15
+        secondary_budget = round(top_n * 0.25)   # 3-4 of 15
+        # fill_budget is whatever remains
+
+        result:    list = []
+        used_cats: set  = set()
+        already:   set  = {str(p) for p in result}
+
+        # ── Tier 1: primary categories, proportional slots ────────────────
+        if primary_cats:
+            total_ps = sum(s for s, _ in primary_cats.values())
+            primary_sorted = sorted(primary_cats.items(), key=lambda x: -x[1][0])
+
+            # Proportional allocation, min 2 per primary category
+            raw_slots: dict = {}
+            for name, (score, _) in primary_sorted:
+                raw_slots[name] = max(2, round(primary_budget * score / total_ps))
+
+            # Clamp total to primary_budget (reduce least-relevant first)
+            while sum(raw_slots.values()) > primary_budget:
+                worst = min(raw_slots, key=lambda n: primary_cats[n][0])
+                if raw_slots[worst] > 1:
+                    raw_slots[worst] -= 1
+                else:
+                    break
+
+            # Pick top-N images per primary category (ranked by individual score)
+            cat_image_pool: dict = {}
+            for score, cat_name, p in all_scored:
+                cat_image_pool.setdefault(cat_name, []).append((score, p))
+            for cat_name in cat_image_pool:
+                cat_image_pool[cat_name].sort(key=lambda x: -x[0])
+
+            for name, slots in raw_slots.items():
+                for _, p in (cat_image_pool.get(name, []))[:slots]:
+                    if str(p) not in already:
+                        result.append(p)
+                        already.add(str(p))
+                        used_cats.add(name)
+
+        # ── Tier 2: secondary categories, 1-2 images each ────────────────
+        secondary_sorted = sorted(secondary_cats.items(), key=lambda x: -x[1][0])
+        sec_added = 0
+        for name, (score, best_p) in secondary_sorted:
+            if sec_added >= secondary_budget or len(result) >= top_n:
                 break
+            # Up to 2 images per secondary category (1 if budget is tight)
+            slots_for_sec = 2 if sec_added + 2 <= secondary_budget else 1
+            for _, p in (cat_image_pool.get(name, []))[:slots_for_sec]:
+                if str(p) not in already and len(result) < top_n:
+                    result.append(p)
+                    already.add(str(p))
+                    used_cats.add(name)
+                    sec_added += 1
 
-        # Step 2: fill remaining slots from global top scorers (any category)
+        # ── Tier 3: fill remaining slots with high tag-overlap images ─────
+        # Only include if image has genuine brief relevance (≥ FILL_MIN_TAGS matches)
         if len(result) < top_n:
             all_scored.sort(key=lambda x: -x[0])
-            already = {str(p) for p in result}
             for score, cat_name, p in all_scored:
-                if str(p) not in already:
+                if len(result) >= top_n:
+                    break
+                if str(p) in already:
+                    continue
+                # Compute raw tag_overlap for this image (without cat_bonus)
+                # score = cat_bonus + tag_overlap + quality/10 → tag_overlap ≈ score - cat_bonus
+                cat_bonus_for_img = next(
+                    (cs for _, cs, cn in index_dirs if cn == cat_name), 0.0
+                )
+                approx_tag_overlap = score - cat_bonus_for_img
+                if approx_tag_overlap >= FILL_MIN_TAGS:
                     result.append(p)
                     already.add(str(p))
                     used_cats.add(cat_name)
-                if len(result) >= top_n:
-                    break
 
         if result:
             cats_display = ", ".join(sorted(used_cats))
