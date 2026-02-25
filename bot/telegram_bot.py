@@ -152,6 +152,275 @@ def detect_intent(text: str) -> Optional[str]:
     return None
 
 
+# ── Bulk input parser ─────────────────────────────────────────────────────────
+
+# Maps header patterns (lowercase) → brief field name
+_BULK_FIELD_PATTERNS: list[tuple[str, str]] = [
+    # product
+    (r"s[aả]n ph[aẩ]m(?:\s*/\s*d[iị]ch\s*v[uụ])?", "product"),
+    (r"product(?:\s*/\s*service)?", "product"),
+    (r"d[iị]ch\s*v[uụ]", "product"),
+    # audience
+    (r"target\s*audience", "audience"),
+    (r"audience", "audience"),
+    (r"kh[aá]ch\s*h[aà]ng(?:\s*m[uụ]c\s*ti[eê]u)?", "audience"),
+    (r"[đd][oố]i\s*t[uượ][oợ]ng", "audience"),
+    # tone
+    (r"tone(?:\s*[&/]\s*personality)?", "tone"),
+    (r"c[aá]\s*t[ií]nh", "tone"),
+    (r"personality", "tone"),
+    # core promise / tagline
+    (r"core\s*promise", "core_promise"),
+    (r"tagline", "core_promise"),
+    (r"promise", "core_promise"),
+    (r"kh[aẩ]u\s*hi[eệ]u", "core_promise"),
+    (r"[đd][iị]nh\s*h[uướ][oớ]ng", "core_promise"),
+    # geography
+    (r"geography", "geography"),
+    (r"market", "geography"),
+    (r"[đd][iị]a\s*l[yý]", "geography"),
+    (r"th[iị]\s*tr[uướ][oờ]ng", "geography"),
+    (r"v[uù]ng", "geography"),
+    # competitors (handled separately — sub-sections)
+    (r"competitors?", "competitors"),
+    (r"[đd][oố]i\s*th[uủ]", "competitors"),
+    # moodboard
+    (r"moodboard(?:\s*notes?)?", "moodboard_notes"),
+    (r"aesthetic", "moodboard_notes"),
+    (r"visual\s*references?", "moodboard_notes"),
+    (r"visual", "moodboard_notes"),
+    # keywords
+    (r"keywords?", "keywords"),
+    (r"t[uừ]\s*kh[oó][aá]", "keywords"),
+]
+
+# Competitor sub-section patterns
+_COMPETITOR_SUBS = [
+    (r"direct", "direct"),
+    (r"aspirational", "aspirational"),
+    (r"avoid", "avoid"),
+    (r"tr[uự]c\s*ti[eế]p", "direct"),
+    (r"c[aạ]nh\s*tranh\s*tr[uự]c\s*ti[eế]p", "direct"),
+    (r"h[uướ][oớ]ng\s*[đd][eế]n", "aspirational"),
+    (r"tr[aá]nh", "avoid"),
+]
+
+
+def _parse_bulk_fields(text: str, brief: "ConversationBrief") -> int:
+    """
+    Detect 'Field: value' patterns in text, fill all matched brief fields.
+    Returns number of distinct fields filled (≥2 means bulk input detected).
+    """
+    import re
+
+    lines = text.splitlines()
+
+    # Build a header regex for quick detection
+    header_rx = re.compile(
+        r"^(" + "|".join(p for p, _ in _BULK_FIELD_PATTERNS) + r")\s*[:：]\s*(.*)$",
+        re.IGNORECASE,
+    )
+
+    # First pass: count matching header lines to decide if this is bulk input
+    header_line_indices: list[tuple[int, str, str]] = []  # (line_idx, field, value_start)
+    for i, line in enumerate(lines):
+        m = header_rx.match(line.strip())
+        if m:
+            matched_header = m.group(1).lower().strip()
+            value_start = m.group(2).strip()
+            # Resolve which field
+            for pattern, field in _BULK_FIELD_PATTERNS:
+                if re.fullmatch(pattern, matched_header, re.IGNORECASE):
+                    header_line_indices.append((i, field, value_start))
+                    break
+
+    # Deduplicate to unique fields in order of appearance
+    seen: set[str] = set()
+    unique_headers: list[tuple[int, str, str]] = []
+    for idx, field, val in header_line_indices:
+        if field not in seen:
+            seen.add(field)
+            unique_headers.append((idx, field, val))
+
+    if len(unique_headers) < 2:
+        return 0  # Not bulk input
+
+    # Second pass: extract multi-line values between headers
+    def _extract_value(start_line_idx: int, value_start: str, next_line_idx: int) -> str:
+        """Collect lines from start to next header."""
+        parts = [value_start] if value_start else []
+        for li in range(start_line_idx + 1, next_line_idx):
+            parts.append(lines[li])
+        return "\n".join(parts).strip()
+
+    filled = 0
+    for i, (line_idx, field, value_start) in enumerate(unique_headers):
+        next_idx = unique_headers[i + 1][0] if i + 1 < len(unique_headers) else len(lines)
+        value = _extract_value(line_idx, value_start, next_idx)
+
+        if not value or value.lower() in {"skip", "bỏ qua", "-", "n/a", ""}:
+            continue
+
+        if field == "product":
+            brief.product = value
+            filled += 1
+        elif field == "audience":
+            brief.audience = value
+            filled += 1
+        elif field == "tone":
+            brief.tone = value
+            filled += 1
+        elif field == "core_promise":
+            brief.core_promise = value
+            filled += 1
+        elif field == "geography":
+            brief.geography = value
+            filled += 1
+        elif field == "competitors":
+            _parse_competitors_block(value, brief)
+            filled += 1
+        elif field == "moodboard_notes":
+            brief.moodboard_notes = value
+            filled += 1
+        elif field == "keywords":
+            kws = re.split(r"[,\n]+", value)
+            brief.keywords = [k.strip().lstrip("-• ") for k in kws if k.strip()]
+            filled += 1
+
+    return filled
+
+
+def _parse_competitors_block(text: str, brief: "ConversationBrief") -> None:
+    """Parse structured competitor block with Direct/Aspirational/Avoid sub-sections."""
+    import re
+
+    sub_rx = re.compile(
+        r"^(" + "|".join(p for p, _ in _COMPETITOR_SUBS) + r")\s*[:：]\s*(.+)$",
+        re.IGNORECASE,
+    )
+    lines = text.splitlines()
+    has_structured = False
+    for line in lines:
+        m = sub_rx.match(line.strip())
+        if m:
+            has_structured = True
+            sub_key = m.group(1).lower().strip()
+            names = [n.strip() for n in m.group(2).split(",") if n.strip()]
+            for pattern, label in _COMPETITOR_SUBS:
+                if re.fullmatch(pattern, sub_key, re.IGNORECASE):
+                    if label == "direct":
+                        brief.competitors_direct = names
+                    elif label == "aspirational":
+                        brief.competitors_aspirational = names
+                    elif label == "avoid":
+                        brief.competitors_avoid = names
+                    break
+
+    if not has_structured:
+        # Unstructured: treat whole text as direct
+        names = [n.strip() for n in re.split(r"[,;\n]+", text) if n.strip()]
+        if names:
+            brief.competitors_direct = names
+
+
+def _next_unfilled_state(brief: "ConversationBrief") -> int:
+    """Return the next conversation state that still needs user input."""
+    if not brief.product:
+        return PRODUCT
+    if not brief.audience:
+        return AUDIENCE
+    if not brief.tone:
+        return TONE
+    if not brief.core_promise:
+        return CORE_PROMISE
+    if not brief.geography:
+        return GEOGRAPHY
+    if not (brief.competitors_direct or brief.competitors_aspirational or brief.competitors_avoid):
+        return COMPETITORS
+    if not brief.moodboard_notes:
+        return MOODBOARD_NOTES
+    if not brief.keywords:
+        return KEYWORDS
+    return MODE_CHOICE
+
+
+async def _ask_for_state(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, state: int
+) -> int:
+    """Send the appropriate question message for a given state and return that state."""
+    await send_typing(update)
+    if state == PRODUCT:
+        await update.message.reply_text(
+            "*Mô tả ngắn về sản phẩm/dịch vụ?*\n"
+            "_\\(ví dụ: SaaS platform giúp logistics track shipments bằng AI\\)_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return PRODUCT
+    if state == AUDIENCE:
+        await update.message.reply_text(
+            "*Target audience là ai?*\n"
+            "_\\(ví dụ: Ops managers tại mid\\-market e\\-commerce\\)_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return AUDIENCE
+    if state == TONE:
+        await update.message.reply_text(
+            "*Tone/cá tính thương hiệu?*\n"
+            "_Chọn một trong các hướng dưới đây, hoặc tự mô tả\\:_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=TONE_KEYBOARD,
+        )
+        return TONE
+    if state == CORE_PROMISE:
+        await update.message.reply_text(
+            "*Core promise / câu tagline định hướng?*\n"
+            "_\\(optional — gõ /skip để bỏ qua\\)_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return CORE_PROMISE
+    if state == GEOGRAPHY:
+        await update.message.reply_text(
+            "*Geography / thị trường mục tiêu?*\n"
+            "_\\(optional — gõ /skip để bỏ qua\\)_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return GEOGRAPHY
+    if state == COMPETITORS:
+        await update.message.reply_text(
+            "*Đối thủ cạnh tranh?*\n\n"
+            "Format gợi ý:\n"
+            "`Direct: CompanyA, CompanyB`\n"
+            "`Aspirational: BrandX, BrandY`\n"
+            "`Avoid: OldCorp`\n\n"
+            "_Hoặc chỉ liệt kê tên, hoặc /skip_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return COMPETITORS
+    if state == MOODBOARD_NOTES:
+        await update.message.reply_text(
+            "*Moodboard notes?*\n"
+            "_\\(optional — mô tả aesthetic bạn muốn, ví dụ: \"Minimal như Linear, accent màu navy\"\\)_\n"
+            "_Gõ /skip để bỏ qua_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return MOODBOARD_NOTES
+    if state == KEYWORDS:
+        await update.message.reply_text(
+            "*Keywords thương hiệu?*\n"
+            "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
+            "_/skip để bỏ qua_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return KEYWORDS
+    # MODE_CHOICE or anything beyond → show mode picker
+    await update.message.reply_text(
+        "*Chọn chế độ generate:*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=MODE_KEYBOARD,
+    )
+    return MODE_CHOICE
+
+
 # ── History management ────────────────────────────────────────────────────────
 
 def push_history(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
@@ -342,8 +611,44 @@ async def step_brand_name(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return await handle_back(update, context)
     brief = get_brief(context)
     push_history(context, BRAND_NAME)
-    brief.brand_name = update.message.text.strip()
+
+    text = update.message.text.strip()
+
+    # Check for bulk input — user may paste brand name + other fields together.
+    # Brand name is the first non-blank line (or "Brand: <name>" pattern).
+    import re as _re
+    brand_line_match = _re.match(
+        r"^(?:brand(?:\s*name)?\s*[:：]\s*)?(.+?)$",
+        text.splitlines()[0] if text else text,
+        _re.IGNORECASE,
+    )
+    brief.brand_name = (brand_line_match.group(1).strip() if brand_line_match else text.splitlines()[0].strip()) or text
+
+    # Try to parse remaining lines as bulk field input
+    remaining = "\n".join(text.splitlines()[1:]).strip() if "\n" in text else ""
+    filled = _parse_bulk_fields(remaining, brief) if remaining else 0
+
     await send_typing(update)
+
+    if filled >= 1:
+        # Jump ahead past already-filled fields
+        next_state = _next_unfilled_state(brief)
+        filled_summary = f"✅ Đã điền {filled} field từ input của bạn\\.\n\n"
+        if next_state == MODE_CHOICE:
+            await update.message.reply_text(
+                f"Tuyệt\\! *{escape_md(brief.brand_name)}* 🎯\n\n"
+                f"{filled_summary}"
+                f"*Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await update.message.reply_text(
+            f"Tuyệt\\! *{escape_md(brief.brand_name)}* 🎯\n\n{filled_summary}",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     await update.message.reply_text(
         f"Tuyệt\\! *{escape_md(brief.brand_name)}* — nghe hay đấy\\! 🎯\n\n"
         f"*Mô tả ngắn về sản phẩm/dịch vụ?*\n"
@@ -361,7 +666,30 @@ async def step_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return await handle_back(update, context)
     brief = get_brief(context)
     push_history(context, PRODUCT)
-    brief.product = update.message.text.strip()
+    text = update.message.text.strip()
+
+    # Try bulk parse first — user may paste multiple fields at once
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        # Multiple fields detected & filled; jump to next unfilled
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
+    # Single-field input — use normally
+    brief.product = text
     await send_typing(update)
     await update.message.reply_text(
         "*Target audience là ai?*\n"
@@ -379,7 +707,27 @@ async def step_audience(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return await handle_back(update, context)
     brief = get_brief(context)
     push_history(context, AUDIENCE)
-    brief.audience = update.message.text.strip()
+    text = update.message.text.strip()
+
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
+    brief.audience = text
     await send_typing(update)
     await update.message.reply_text(
         "*Tone/cá tính thương hiệu?*\n"
@@ -453,8 +801,30 @@ async def step_tone_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return CORE_PROMISE
     brief = get_brief(context)
+    text = update.message.text.strip()
+
+    # Check for bulk input regardless of whether we're in custom-tone mode
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        context.user_data.pop(TONE_CUSTOM_KEY, None)
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     if context.user_data.pop(TONE_CUSTOM_KEY, False):
-        brief.tone = update.message.text.strip()
+        brief.tone = text
         await send_typing(update)
         await update.message.reply_text(
             f"✅ Tone: _{escape_md(brief.tone)}_\n\n"
@@ -476,6 +846,26 @@ async def step_core_promise(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     brief = get_brief(context)
     push_history(context, CORE_PROMISE)
     text = update.message.text.strip()
+
+    # Check for bulk input
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     if text.lower() != "/skip" and intent != "skip":
         brief.core_promise = text
     await send_typing(update)
@@ -497,6 +887,26 @@ async def step_geography(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     brief = get_brief(context)
     push_history(context, GEOGRAPHY)
     text = update.message.text.strip()
+
+    # Check for bulk input
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     if text.lower() != "/skip" and intent != "skip":
         brief.geography = text
     await send_typing(update)
@@ -521,6 +931,26 @@ async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     brief = get_brief(context)
     push_history(context, COMPETITORS)
     text = update.message.text.strip()
+
+    # Check for bulk input (e.g. user pastes competitors + moodboard + keywords)
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     if text.lower() != "/skip" and intent != "skip" and text:
         import re
         lines = text.splitlines()
@@ -560,6 +990,26 @@ async def step_moodboard_notes(update: Update, context: ContextTypes.DEFAULT_TYP
     brief = get_brief(context)
     push_history(context, MOODBOARD_NOTES)
     text = update.message.text.strip()
+
+    # Check for bulk input (e.g. user pastes moodboard + keywords together)
+    filled = _parse_bulk_fields(text, brief)
+    if filled >= 2:
+        next_state = _next_unfilled_state(brief)
+        if next_state == MODE_CHOICE:
+            await send_typing(update)
+            await update.message.reply_text(
+                f"✅ Đã điền {filled} fields\\. *Chọn chế độ generate:*",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=MODE_KEYBOARD,
+            )
+            return MODE_CHOICE
+        await send_typing(update)
+        await update.message.reply_text(
+            f"✅ Đã điền {filled} fields\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return await _ask_for_state(update, context, next_state)
+
     if text.lower() != "/skip" and intent != "skip":
         brief.moodboard_notes = text
     await send_typing(update)
@@ -637,6 +1087,9 @@ async def step_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     brief = get_brief(context)
     push_history(context, KEYWORDS)
     text = update.message.text.strip()
+
+    # Keywords step is the last before mode — no bulk jump needed beyond keywords,
+    # but check anyway in case user pastes "Keywords: x, y\nMode: full" etc.
     if text.lower() != "/skip" and intent != "skip" and text:
         import re
         kws = re.split(r"[,\n]+", text)
