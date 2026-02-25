@@ -13,6 +13,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+# Sentinel used when a user explicitly skips an optional field.
+# The field is set to this value so _next_unfilled_state treats it as "filled"
+# (truthy) and doesn't re-ask. The sentinel is filtered out before output.
+SKIP_SENTINEL = "-"
+
+
+def _real(value) -> bool:
+    """Return True if value has real content (not empty and not the skip sentinel)."""
+    if not value:
+        return False
+    if isinstance(value, list):
+        return any(v != SKIP_SENTINEL for v in value)
+    return value != SKIP_SENTINEL
+
+
+def _clean_list(lst: List[str]) -> List[str]:
+    """Return list without sentinel values."""
+    return [v for v in lst if v != SKIP_SENTINEL]
+
 
 # ── Conversation data model ───────────────────────────────────────────────────
 
@@ -54,19 +73,20 @@ class ConversationBrief:
         ]
         if self.tone:
             lines.append(f"🎨 *Tone:* {self.tone}")
-        if self.core_promise:
+        if _real(self.core_promise):
             lines.append(f"💬 *Core promise:* _{self.core_promise}_")
-        if self.geography:
+        if _real(self.geography):
             lines.append(f"🌍 *Geography:* {self.geography}")
-        if self.competitors_direct:
-            lines.append(f"🏢 *Competitors:* {', '.join(self.competitors_direct)}")
-        if self.competitors_aspirational:
-            lines.append(f"✨ *Aspirational:* {', '.join(self.competitors_aspirational)}")
-        if self.keywords:
-            lines.append(f"🔑 *Keywords:* {', '.join(self.keywords[:6])}")
-        if self.color_preferences:
+        if _real(self.competitors_direct):
+            lines.append(f"🏢 *Competitors:* {', '.join(_clean_list(self.competitors_direct))}")
+        if _real(self.competitors_aspirational):
+            lines.append(f"✨ *Aspirational:* {', '.join(_clean_list(self.competitors_aspirational))}")
+        kws = _clean_list(self.keywords)
+        if kws:
+            lines.append(f"🔑 *Keywords:* {', '.join(kws[:6])}")
+        if _real(self.color_preferences):
             lines.append(f"🎨 *Colors:* {self.color_preferences[:80]}{'...' if len(self.color_preferences) > 80 else ''}")
-        if self.moodboard_notes:
+        if _real(self.moodboard_notes):
             lines.append(f"🖼 *Moodboard:* {self.moodboard_notes[:80]}...")
         total_imgs = len(self.moodboard_image_paths) + len(self.logo_inspiration_paths) + len(self.pattern_inspiration_paths)
         if total_imgs:
@@ -96,29 +116,29 @@ class ConversationBrief:
         if self.tone:
             sections.append(f"## Tone\n{self.tone}\n")
 
-        if self.core_promise:
+        if _real(self.core_promise):
             sections.append(f"## Core Promise\n\"{self.core_promise}\"\n")
 
-        if self.geography:
+        if _real(self.geography):
             sections.append(f"## Geography\n{self.geography}\n")
 
         # Competitors section
         comp_lines = []
-        if self.competitors_direct:
-            comp_lines.append(f"Direct: {', '.join(self.competitors_direct)}")
-        if self.competitors_aspirational:
-            comp_lines.append(f"Aspirational: {', '.join(self.competitors_aspirational)}")
-        if self.competitors_avoid:
-            comp_lines.append(f"Avoid: {', '.join(self.competitors_avoid)}")
+        if _real(self.competitors_direct):
+            comp_lines.append(f"Direct: {', '.join(_clean_list(self.competitors_direct))}")
+        if _real(self.competitors_aspirational):
+            comp_lines.append(f"Aspirational: {', '.join(_clean_list(self.competitors_aspirational))}")
+        if _real(self.competitors_avoid):
+            comp_lines.append(f"Avoid: {', '.join(_clean_list(self.competitors_avoid))}")
         if comp_lines:
             sections.append("## Competitors\n" + "\n".join(comp_lines) + "\n")
 
-        if self.color_preferences:
+        if _real(self.color_preferences):
             sections.append(f"## Color Preferences\n{self.color_preferences}\n")
 
-        if self.moodboard_notes or self.moodboard_image_paths or self.logo_inspiration_paths or self.pattern_inspiration_paths:
+        if _real(self.moodboard_notes) or self.moodboard_image_paths or self.logo_inspiration_paths or self.pattern_inspiration_paths:
             moodboard_lines = []
-            if self.moodboard_notes:
+            if _real(self.moodboard_notes):
                 moodboard_lines.append(self.moodboard_notes)
             if self.logo_inspiration_paths:
                 moodboard_lines.append(
@@ -132,8 +152,9 @@ class ConversationBrief:
                 )
             sections.append(f"## Moodboard\n" + "\n".join(moodboard_lines) + "\n")
 
-        if self.keywords:
-            kw_lines = "\n".join(f"- {kw}" for kw in self.keywords)
+        kws = _clean_list(self.keywords)
+        if kws:
+            kw_lines = "\n".join(f"- {kw}" for kw in kws)
             sections.append(f"## Keywords\n{kw_lines}\n")
 
         return "\n".join(sections)

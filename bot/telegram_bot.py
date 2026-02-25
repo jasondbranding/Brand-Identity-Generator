@@ -148,12 +148,23 @@ BACK_PHRASES = {
     "muốn sửa lại", "sửa câu trước",
 }
 
+DONE_PHRASES = {
+    "xong", "done", "ok", "oke", "okay", "tiếp", "tiếp tục", "next",
+    "xong rồi", "đã xong", "hoàn thành", "xong nhé", "xong rồi nhé",
+    "kết thúc", "đủ rồi", "tạm đủ", "đủ", "vậy thôi", "thế thôi",
+}
+
+# Sentinel value: marks a field as explicitly skipped (so bot doesn't re-ask)
+SKIP_SENTINEL = "-"
+
 
 def detect_intent(text: str) -> Optional[str]:
-    """Detect 'skip' or 'back' from natural language. Returns 'skip', 'back', or None."""
+    """Detect 'skip', 'done', or 'back' from natural language."""
     normalized = text.strip().lower()
     if normalized in BACK_PHRASES or any(p in normalized for p in BACK_PHRASES):
         return "back"
+    if normalized in DONE_PHRASES:
+        return "done"
     if normalized in SKIP_PHRASES:
         return "skip"
     # Fuzzy skip for short phrases containing skip keywords
@@ -341,6 +352,17 @@ def _parse_competitors_block(text: str, brief: "ConversationBrief") -> None:
             brief.competitors_direct = names
 
 
+def _is_filled(value) -> bool:
+    """True if field has real content (not empty and not the skip sentinel)."""
+    if not value:
+        return False
+    if isinstance(value, list):
+        # A list is "filled" if it has at least one non-sentinel item
+        real = [v for v in value if v != SKIP_SENTINEL]
+        return bool(real) or value == [SKIP_SENTINEL]  # sentinel list counts as filled
+    return True  # any non-empty string (including SKIP_SENTINEL) counts as filled
+
+
 def _next_unfilled_state(brief: "ConversationBrief") -> int:
     """Return the next conversation state that still needs user input."""
     if not brief.product:
@@ -349,17 +371,17 @@ def _next_unfilled_state(brief: "ConversationBrief") -> int:
         return AUDIENCE
     if not brief.tone:
         return TONE
-    if not brief.core_promise:
+    if not brief.core_promise:          # sentinel "-" is truthy → skips correctly
         return CORE_PROMISE
-    if not brief.geography:
+    if not brief.geography:             # same
         return GEOGRAPHY
     if not (brief.competitors_direct or brief.competitors_aspirational or brief.competitors_avoid):
         return COMPETITORS
-    if not brief.moodboard_notes:
+    if not brief.moodboard_notes:       # same
         return MOODBOARD_NOTES
-    if not brief.keywords:
+    if not brief.keywords:              # ["-"] is truthy → skips correctly
         return KEYWORDS
-    if not brief.color_preferences:
+    if not brief.color_preferences:    # same
         return COLOR_PREFERENCES
     return MODE_CHOICE
 
@@ -370,12 +392,12 @@ def _state_question_text(state: int) -> str:
         PRODUCT:      "*Mô tả ngắn về sản phẩm/dịch vụ?*\n_\\(ví dụ: SaaS platform giúp logistics track shipments bằng AI\\)_",
         AUDIENCE:     "*Target audience là ai?*\n_\\(ví dụ: Ops managers tại mid\\-market e\\-commerce\\)_",
         TONE:         "*Tone/cá tính thương hiệu?*\n_Chọn một trong các hướng dưới đây, hoặc tự mô tả\\:_",
-        CORE_PROMISE: "*Core promise / câu tagline định hướng?*\n_\\(optional — gõ /skip để bỏ qua\\)_",
-        GEOGRAPHY:    "*Geography / thị trường mục tiêu?*\n_\\(optional — gõ /skip để bỏ qua\\)_",
-        COMPETITORS:  "*Đối thủ cạnh tranh?*\n_\\(Direct/Aspirational/Avoid — hoặc /skip\\)_",
-        MOODBOARD_NOTES: "*Moodboard notes?*\n_\\(optional — gõ /skip để bỏ qua\\)_",
-        KEYWORDS:     "*Keywords thương hiệu?*\n_\\(optional — /skip để bỏ qua\\)_",
-        COLOR_PREFERENCES: "🎨 *Màu sắc ưu tiên?*\n_\\(optional — /skip để AI tự chọn\\)_",
+        CORE_PROMISE: "*Core promise / câu tagline định hướng?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
+        GEOGRAPHY:    "*Geography / thị trường mục tiêu?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
+        COMPETITORS:  "*Đối thủ cạnh tranh?*\n_\\(Direct/Aspirational/Avoid — hoặc nhắn 'bỏ qua'\\)_",
+        MOODBOARD_NOTES: "*Moodboard notes?*\n_\\(optional — nhắn 'bỏ qua' nếu không có\\)_",
+        KEYWORDS:     "*Keywords thương hiệu?*\n_\\(optional — nhắn 'bỏ qua' nếu chưa có\\)_",
+        COLOR_PREFERENCES: "🎨 *Màu sắc ưu tiên?*\n_\\(optional — nhắn 'bỏ qua' để AI tự chọn\\)_",
     }.get(state, "*Chọn chế độ generate:*")
 
 
@@ -409,14 +431,14 @@ async def _ask_for_state(
     if state == CORE_PROMISE:
         await update.message.reply_text(
             "*Core promise / câu tagline định hướng?*\n"
-            "_\\(optional — gõ /skip để bỏ qua\\)_",
+            "_\\(optional — nhắn_ *bỏ qua* _nếu chưa có\\)_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return CORE_PROMISE
     if state == GEOGRAPHY:
         await update.message.reply_text(
             "*Geography / thị trường mục tiêu?*\n"
-            "_\\(optional — gõ /skip để bỏ qua\\)_",
+            "_\\(optional — nhắn_ *bỏ qua* _nếu chưa có\\)_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return GEOGRAPHY
@@ -427,7 +449,7 @@ async def _ask_for_state(
             "`Direct: CompanyA, CompanyB`\n"
             "`Aspirational: BrandX, BrandY`\n"
             "`Avoid: OldCorp`\n\n"
-            "_Hoặc chỉ liệt kê tên, hoặc /skip_",
+            "_Hoặc chỉ liệt kê tên, hoặc nhắn_ *bỏ qua*",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return COMPETITORS
@@ -435,7 +457,7 @@ async def _ask_for_state(
         await update.message.reply_text(
             "*Moodboard notes?*\n"
             "_\\(optional — mô tả aesthetic bạn muốn, ví dụ: \"Minimal như Linear, accent màu navy\"\\)_\n"
-            "_Gõ /skip để bỏ qua_",
+            "_Nhắn_ *bỏ qua* _nếu không có_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return MOODBOARD_NOTES
@@ -443,7 +465,7 @@ async def _ask_for_state(
         await update.message.reply_text(
             "*Keywords thương hiệu?*\n"
             "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
-            "_/skip để bỏ qua_",
+            "_Nhắn_ *bỏ qua* _nếu chưa có_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return KEYWORDS
@@ -452,7 +474,7 @@ async def _ask_for_state(
             "🎨 *Màu sắc ưu tiên?*\n\n"
             "_\\(optional — gợi ý màu bạn muốn dùng cho brand\\)_\n"
             "_Ví dụ: \"Xanh navy \\+ vàng gold\", \"Tone earthy: nâu đất, be, rêu\", \"Tối giản đen trắng\"_\n\n"
-            "_/skip để AI tự chọn palette_",
+            "_Nhắn_ *bỏ qua* _để AI tự chọn palette_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return COLOR_PREFERENCES
@@ -979,7 +1001,9 @@ async def step_core_promise(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return await _ask_for_state(update, context, next_state)
 
-    if text.lower() != "/skip" and intent != "skip":
+    if intent == "skip" or text.lower() == "/skip":
+        brief.core_promise = SKIP_SENTINEL  # mark as explicitly skipped
+    else:
         brief.core_promise = text
     await send_typing(update)
     # Jump to the actual next unfilled state (geography may already be filled from bulk input)
@@ -1016,7 +1040,9 @@ async def step_geography(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return await _ask_for_state(update, context, next_state)
 
-    if text.lower() != "/skip" and intent != "skip":
+    if intent == "skip" or text.lower() == "/skip":
+        brief.geography = SKIP_SENTINEL  # mark as explicitly skipped
+    else:
         brief.geography = text
     await send_typing(update)
     # Jump to the actual next unfilled state (competitors may already be filled)
@@ -1053,7 +1079,9 @@ async def step_competitors(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return await _ask_for_state(update, context, next_state)
 
-    if text.lower() != "/skip" and intent != "skip" and text:
+    if intent == "skip" or text.lower() == "/skip":
+        brief.competitors_direct = [SKIP_SENTINEL]  # mark as explicitly skipped
+    elif text:
         import re
         lines = text.splitlines()
         for line in lines:
@@ -1108,13 +1136,15 @@ async def step_moodboard_notes(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return await _ask_for_state(update, context, next_state)
 
-    if text.lower() != "/skip" and intent != "skip":
+    if intent == "skip" or text.lower() == "/skip":
+        brief.moodboard_notes = SKIP_SENTINEL  # mark as explicitly skipped
+    else:
         brief.moodboard_notes = text
     await send_typing(update)
     await update.message.reply_text(
         "📸 *Muốn upload ảnh moodboard không?*\n\n"
-        "Gửi ảnh trực tiếp \\(có thể gửi nhiều\\) — AI sẽ học từ visual references của bạn\\.\n\n"
-        "_Khi xong, gõ /done_  \\|  _/skip để bỏ qua_",
+        "Gửi ảnh vào \\(có thể gửi nhiều\\) — AI sẽ học từ visual references của bạn\\.\n\n"
+        "_Nhắn_ *xong* _khi đã gửi hết_  \\|  _hoặc_ *bỏ qua* _nếu không có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return MOODBOARD_IMAGES
@@ -1131,7 +1161,22 @@ async def step_moodboard_image(update: Update, context: ContextTypes.DEFAULT_TYP
         return MOODBOARD_IMAGES
     brief.moodboard_image_paths.append(img_path)
     await update.message.reply_text(
-        f"📸 Đã nhận ảnh \\#{idx}\\! Gửi tiếp hoặc gõ /done khi xong\\.",
+        f"📸 Đã nhận ảnh \\#{idx}\\! Gửi tiếp, hoặc nhắn *xong* khi đã gửi hết\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return MOODBOARD_IMAGES
+
+
+async def step_moodboard_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text messages in MOODBOARD_IMAGES state (e.g. 'xong', 'bỏ qua')."""
+    intent = detect_intent(update.message.text or "")
+    if intent == "done":
+        return await step_moodboard_done(update, context)
+    if intent == "skip":
+        return await step_moodboard_skip(update, context)
+    await update.message.reply_text(
+        "📸 Gửi ảnh vào để AI học từ visual references của bạn\\.\n"
+        "Nhắn *xong* khi đã gửi hết, hoặc *bỏ qua* nếu không có\\.  ",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return MOODBOARD_IMAGES
@@ -1147,7 +1192,7 @@ async def step_moodboard_done(update: Update, context: ContextTypes.DEFAULT_TYPE
         "🔤 *Bạn có ảnh logo nào muốn tham khảo không?*\n"
         "_\\(logo của brand khác mà bạn thích về phong cách, font, biểu tượng\\.\\.\\.\\)_\n\n"
         "_Gửi ảnh trực tiếp \\(hoặc dạng file\\) — có thể gửi nhiều_\n"
-        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        "_Nhắn_ *xong* _khi đã gửi hết \\|_ *bỏ qua* _nếu không có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return LOGO_INSPIRATION
@@ -1160,7 +1205,7 @@ async def step_moodboard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE
         "🔤 *Bạn có ảnh logo nào muốn tham khảo không?*\n"
         "_\\(logo của brand khác mà bạn thích về phong cách, font, biểu tượng\\.\\.\\.\\)_\n\n"
         "_Gửi ảnh trực tiếp \\(hoặc dạng file\\) — có thể gửi nhiều_\n"
-        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        "_Nhắn_ *xong* _khi đã gửi hết \\|_ *bỏ qua* _nếu không có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return LOGO_INSPIRATION
@@ -1177,7 +1222,22 @@ async def step_logo_inspiration_image(update: Update, context: ContextTypes.DEFA
         return LOGO_INSPIRATION
     brief.logo_inspiration_paths.append(img_path)
     await update.message.reply_text(
-        f"🔤 Đã nhận logo ref \\#{idx}\\! Gửi tiếp hoặc /done khi xong\\.",
+        f"🔤 Đã nhận logo ref \\#{idx}\\! Gửi tiếp, hoặc nhắn *xong* khi đã gửi hết\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return LOGO_INSPIRATION
+
+
+async def step_logo_inspiration_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text messages in LOGO_INSPIRATION state (e.g. 'xong', 'bỏ qua')."""
+    intent = detect_intent(update.message.text or "")
+    if intent == "done":
+        return await step_logo_inspiration_done(update, context)
+    if intent == "skip":
+        return await step_logo_inspiration_skip(update, context)
+    await update.message.reply_text(
+        "🔤 Gửi ảnh logo mẫu bạn muốn tham khảo\\.\n"
+        "Nhắn *xong* khi đã gửi hết, hoặc *bỏ qua* nếu không có\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return LOGO_INSPIRATION
@@ -1193,7 +1253,7 @@ async def step_logo_inspiration_done(update: Update, context: ContextTypes.DEFAU
         "🌿 *Bạn có ảnh hoa văn, hoạ tiết, hoặc banner mẫu nào không?*\n"
         "_\\(pattern, texture, social media banner, bao bì sản phẩm\\.\\.\\. bất kỳ thứ gì định hướng visual layout\\)_\n\n"
         "_Gửi ảnh hoặc file — có thể gửi nhiều_\n"
-        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        "_Nhắn_ *xong* _khi đã gửi hết \\|_ *bỏ qua* _nếu không có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return PATTERN_INSPIRATION
@@ -1206,7 +1266,7 @@ async def step_logo_inspiration_skip(update: Update, context: ContextTypes.DEFAU
         "🌿 *Bạn có ảnh hoa văn, hoạ tiết, hoặc banner mẫu nào không?*\n"
         "_\\(pattern, texture, social banner, bao bì sản phẩm — bất kỳ thứ gì định hướng visual layout\\)_\n\n"
         "_Gửi ảnh hoặc file — có thể gửi nhiều_\n"
-        "_/done để tiếp tục \\| /skip để bỏ qua_",
+        "_Nhắn_ *xong* _khi đã gửi hết \\|_ *bỏ qua* _nếu không có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return PATTERN_INSPIRATION
@@ -1223,7 +1283,22 @@ async def step_pattern_inspiration_image(update: Update, context: ContextTypes.D
         return PATTERN_INSPIRATION
     brief.pattern_inspiration_paths.append(img_path)
     await update.message.reply_text(
-        f"🌿 Đã nhận pattern ref \\#{idx}\\! Gửi tiếp hoặc /done khi xong\\.",
+        f"🌿 Đã nhận pattern ref \\#{idx}\\! Gửi tiếp, hoặc nhắn *xong* khi đã gửi hết\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return PATTERN_INSPIRATION
+
+
+async def step_pattern_inspiration_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text messages in PATTERN_INSPIRATION state (e.g. 'xong', 'bỏ qua')."""
+    intent = detect_intent(update.message.text or "")
+    if intent == "done":
+        return await step_pattern_inspiration_done(update, context)
+    if intent == "skip":
+        return await step_pattern_inspiration_skip(update, context)
+    await update.message.reply_text(
+        "🌿 Gửi ảnh hoa văn, pattern hoặc banner mẫu bạn muốn tham khảo\\.\n"
+        "Nhắn *xong* khi đã gửi hết, hoặc *bỏ qua* nếu không có\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return PATTERN_INSPIRATION
@@ -1247,7 +1322,7 @@ async def step_pattern_inspiration_done(update: Update, context: ContextTypes.DE
         "*Keywords thương hiệu?*\n"
         "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
         "_ví dụ: minimal, trustworthy, precision_\n"
-        "_/skip để bỏ qua_",
+        "_Nhắn_ *bỏ qua* _nếu chưa có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return KEYWORDS
@@ -1267,7 +1342,7 @@ async def step_pattern_inspiration_skip(update: Update, context: ContextTypes.DE
         f"⏭ Bỏ qua pattern refs\\.{auto_full_note}\n\n"
         "*Keywords thương hiệu?*\n"
         "_\\(optional — mỗi keyword 1 dòng hoặc cách nhau bằng dấu phẩy\\)_\n"
-        "_/skip để bỏ qua_",
+        "_Nhắn_ *bỏ qua* _nếu chưa có_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     return KEYWORDS
@@ -1302,19 +1377,16 @@ async def step_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
         return await _ask_for_state(update, context, next_state)
 
-    if text.lower() != "/skip" and intent != "skip" and text:
+    if intent == "skip" or text.lower() == "/skip":
+        brief.keywords = [SKIP_SENTINEL]  # mark as explicitly skipped
+    elif text:
         import re
         kws = re.split(r"[,\n]+", text)
         brief.keywords = [k.strip().lstrip("-• ") for k in kws if k.strip()]
     await send_typing(update)
-    await update.message.reply_text(
-        "🎨 *Màu sắc ưu tiên?*\n\n"
-        "_\\(optional — gợi ý màu bạn muốn dùng cho brand\\)_\n"
-        "_Ví dụ: \"Xanh navy \\+ vàng gold\", \"Tone earthy: nâu đất, be, rêu\", \"Tối giản đen trắng\"_\n\n"
-        "_/skip để AI tự chọn palette_",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    return COLOR_PREFERENCES
+    # Use _next_unfilled_state in case color_preferences was already filled via bulk input
+    next_state = _next_unfilled_state(brief)
+    return await _ask_for_state(update, context, next_state)
 
 
 # ── Step 10b: Color Preferences ───────────────────────────────────────────────
@@ -1327,7 +1399,9 @@ async def step_color_preferences(update: Update, context: ContextTypes.DEFAULT_T
     push_history(context, COLOR_PREFERENCES)
     text = update.message.text.strip()
 
-    if text.lower() != "/skip" and intent != "skip" and text:
+    if intent == "skip" or text.lower() == "/skip":
+        brief.color_preferences = SKIP_SENTINEL  # mark as explicitly skipped
+    elif text:
         brief.color_preferences = text
     await send_typing(update)
     await update.message.reply_text(
@@ -1681,18 +1755,22 @@ def build_app(token: str) -> Application:
                 # Accept compressed photos AND images sent as files
                 MessageHandler(filters.PHOTO, step_moodboard_image),
                 MessageHandler(filters.Document.IMAGE, step_moodboard_image),
+                # Accept plain-text commands like "xong" / "bỏ qua"
+                MessageHandler(filters.TEXT & ~filters.COMMAND, step_moodboard_text),
                 CommandHandler("done", step_moodboard_done),
                 CommandHandler("skip", step_moodboard_skip),
             ],
             LOGO_INSPIRATION: [
                 MessageHandler(filters.PHOTO, step_logo_inspiration_image),
                 MessageHandler(filters.Document.IMAGE, step_logo_inspiration_image),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, step_logo_inspiration_text),
                 CommandHandler("done", step_logo_inspiration_done),
                 CommandHandler("skip", step_logo_inspiration_skip),
             ],
             PATTERN_INSPIRATION: [
                 MessageHandler(filters.PHOTO, step_pattern_inspiration_image),
                 MessageHandler(filters.Document.IMAGE, step_pattern_inspiration_image),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, step_pattern_inspiration_text),
                 CommandHandler("done", step_pattern_inspiration_done),
                 CommandHandler("skip", step_pattern_inspiration_skip),
             ],
