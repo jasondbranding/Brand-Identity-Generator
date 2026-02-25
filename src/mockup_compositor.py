@@ -1934,7 +1934,7 @@ def composite_single_mockup(
         prompt = build_mockup_prompt(mockup_key, assets, brand_name, zone_text=zone_text)
 
         # Dark-background mockups need the white logo for contrast
-        DARK_BG_MOCKUPS = {"tote_bag_processed.jpg", "black_shirt_logo_processed.png"}
+        DARK_BG_MOCKUPS = {"tote_bag_processed.jpg", "black_shirt_logo_processed.png", "tshirt_processed.png"}
         if processed_file.name in DARK_BG_MOCKUPS:
             logo_for_ai = (
                 assets.logo_white
