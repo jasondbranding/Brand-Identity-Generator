@@ -1590,12 +1590,12 @@ def _ai_reconstruct_mockup(
             )
         ))
 
-        # Model ladder: Nano Banana Pro (best editing) → Nano Banana → legacy exp
+        # Model ladder: confirmed-working first, experimental last
         _models = [
-            "gemini-3-pro-image-preview",          # Nano Banana Pro — highest quality
-            "gemini-2.5-flash-image",              # Nano Banana — fast fallback
-            "gemini-2.0-flash-preview-image-generation",  # legacy fallback
-            "gemini-2.0-flash-exp-image-generation",      # last resort
+            "gemini-2.5-flash-image",                    # confirmed working
+            "gemini-2.0-flash-exp-image-generation",     # legacy fallback
+            "gemini-3-pro-image-preview",                # may not exist yet
+            "gemini-2.0-flash-preview-image-generation", # last resort
         ]
         response = None
         _model = _models[0]
@@ -1611,8 +1611,11 @@ def _ai_reconstruct_mockup(
                 break  # success — stop trying
             except Exception as _me:
                 err_str = str(_me).lower()
-                # Only retry on model-not-found / permission errors, not on content errors
-                if any(k in err_str for k in ("not found", "permission", "not supported", "invalid")):
+                # Try next model on: not found / permission / SSL / timeout / network errors
+                if any(k in err_str for k in (
+                    "not found", "permission", "not supported", "invalid",
+                    "timed out", "timeout", "ssl", "handshake", "connection",
+                )):
                     continue
                 raise  # re-raise unexpected errors (rate limit, etc.)
         if response is None:
