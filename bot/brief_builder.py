@@ -58,6 +58,9 @@ class ConversationBrief:
     logo_inspiration_paths: List[Path] = field(default_factory=list)   # logo inspiration images
     pattern_inspiration_paths: List[Path] = field(default_factory=list) # pattern/banner refs
 
+    # Pattern description (from HITL pattern phase)
+    pattern_description: str = ""
+
     # Pipeline settings
     mode: str = "full"  # "full" | "quick"
 

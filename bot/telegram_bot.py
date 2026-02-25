@@ -89,7 +89,17 @@ logger = logging.getLogger(__name__)
 DIRECTIONS_KEY   = "directions_output"
 ALL_ASSETS_KEY   = "all_assets"
 OUTPUT_DIR_KEY   = "pipeline_output_dir"
-LOGO_REVIEW_FLAG = "awaiting_logo_review"
+CHOSEN_DIR_KEY   = "chosen_direction"
+ENRICHED_COLORS_KEY = "enriched_colors"
+PALETTE_SHADES_KEY  = "palette_shades"
+PATTERN_REFS_KEY    = "pattern_ref_images"
+
+# HITL flags — each phase sets its flag to True when awaiting user input
+LOGO_REVIEW_FLAG    = "awaiting_logo_review"
+PALETTE_REVIEW_FLAG = "awaiting_palette_review"
+PATTERN_REF_FLAG    = "awaiting_pattern_ref"
+PATTERN_DESC_FLAG   = "awaiting_pattern_desc"
+PATTERN_REVIEW_FLAG = "awaiting_pattern_review"
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -1824,9 +1834,12 @@ async def step_logo_review_callback(update: Update, context: ContextTypes.DEFAUL
         context.user_data[LOGO_REVIEW_FLAG] = False
         context.user_data.pop("logo_refine_mode", None)
 
+        # Store chosen direction for downstream phases
+        context.user_data[CHOSEN_DIR_KEY] = chosen_direction
+
         await query.edit_message_text(
-            f"✅ *Chọn hướng {chosen_num}\\: {escape_md(chosen_direction.direction_name)}*\n\n"
-            f"⏳ Đang gen palette \\+ pattern \\+ mockups\\.\\.\\.",
+            f"✅ *Chốt hướng {chosen_num}\\: {escape_md(chosen_direction.direction_name)}*\n\n"
+            f"⏳ Đang gen logo variants \\+ bảng màu\\.\\.\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
 
@@ -1835,18 +1848,20 @@ async def step_logo_review_callback(update: Update, context: ContextTypes.DEFAUL
         brief_dir = Path(brief_dir_str) if brief_dir_str else None
         api_key = os.environ.get("GEMINI_API_KEY", "")
         brief = get_brief(context)
+        all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
+        chosen_assets = all_assets.get(chosen_num)
 
-        # Launch Phase 2 as a background task
+        # Launch logo variants + palette phase as background task
         asyncio.create_task(
-            _run_pipeline_phase2(
+            _run_logo_variants_and_palette_phase(
                 context=context,
                 chat_id=chat_id,
                 chosen_direction=chosen_direction,
+                chosen_assets=chosen_assets,
                 output_dir=output_dir,
                 brief_dir=brief_dir,
                 brief=brief,
                 api_key=api_key,
-                directions_output=directions_output,
             )
         )
 
@@ -1899,181 +1914,704 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
-# ── Pipeline Phase 2: progressive delivery ────────────────────────────────────
+# ── Sub-phase: logo variants + palette generation ─────────────────────────────
 
-async def _run_pipeline_phase2(
+async def _run_logo_variants_and_palette_phase(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     chosen_direction: object,
+    chosen_assets: object,
     output_dir: Path,
     brief_dir: Optional[Path],
     brief: ConversationBrief,
     api_key: str,
-    directions_output: object,
+    refinement_feedback: Optional[str] = None,
 ) -> None:
     """
-    Phase 2: generate base assets then composite mockups.
-    Each step sends results to Telegram immediately when ready — no waiting for everything.
-
-    Order of delivery:
-      1. Logo variants (white / black / transparent) → send immediately
-      2. Background → send immediately
-      3. Color palette + shades → send immediately
-      4. Pattern → send immediately
-      5. Each mockup composited → send immediately
+    After logo is locked:
+      1. Create logo variants (white/black/transparent + SVG) in background
+      2. Generate palette
+      3. Send both to user
+      4. Enter palette HITL
     """
-    loop = asyncio.get_event_loop()
+    runner = PipelineRunner(api_key=api_key)
     direction_name = escape_md(getattr(chosen_direction, "direction_name", ""))
 
-    progress_msg = await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"⏳ *Phase 2 — {direction_name}*\n\n🖌 Đang render logo variants, palette, pattern\\.\\.\\.",
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
-    progress_msg_id = progress_msg.message_id
+    # ── Step 1: Logo variants ─────────────────────────────────────────────────
+    logo_path = getattr(chosen_assets, "logo", None) if chosen_assets else None
+    logo_variant_paths = {}
+    svg_path = None
 
-    # ── Step 1: Generate base assets in thread ────────────────────────────────
-    runner = PipelineRunner(api_key=api_key)
-    def on_progress(msg: str) -> None:
-        asyncio.create_task(safe_edit(context, chat_id, progress_msg_id, msg))
+    if logo_path and Path(logo_path).exists():
+        try:
+            slug = Path(logo_path).parent.name  # e.g. option_1_bold
+            variant_dir = output_dir / slug
+            variant_dir.mkdir(parents=True, exist_ok=True)
+            logo_variant_paths = await runner.run_logo_variants_phase(
+                logo_path=Path(logo_path),
+                output_dir=variant_dir,
+            )
+            svg_path = logo_variant_paths.pop("logo_svg", None)
+        except Exception as e:
+            logger.warning(f"Logo variants failed: {e}")
 
-    result = await runner.run_assets_phase(
-        direction=chosen_direction,
-        output_dir=output_dir,
-        brief_dir=brief_dir,
-        on_progress=on_progress,
-    )
-
-    if not result.success:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"❌ Phase 2 thất bại\\:\n```\n{escape_md(result.error[:500])}\n```",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        if brief_dir:
-            _cleanup(brief_dir)
-        return
-
-    assets = result.assets
-    elapsed = result.elapsed_seconds
-    mins = int(elapsed // 60)
-    secs = int(elapsed % 60)
-    await safe_edit(
-        context, chat_id, progress_msg_id,
-        f"✅ *Base assets xong\\!* {mins}m {secs}s — đang gửi\\.\\.\\."
-    )
-
-    # ── Step 2: Send logo variants immediately ────────────────────────────────
+    # Send logo variants
     from telegram import InputMediaPhoto
-    logo_variants = []
+    variants_to_send = []
     for attr, label in [
-        ("logo",             "Logo chính"),
         ("logo_white",       "Logo trắng"),
         ("logo_black",       "Logo đen"),
         ("logo_transparent", "Logo transparent"),
     ]:
-        p = getattr(assets, attr, None) if assets else None
+        p = logo_variant_paths.get(attr) or (getattr(chosen_assets, attr, None) if chosen_assets else None)
         if p and Path(p).exists() and Path(p).stat().st_size > 100:
-            logo_variants.append((Path(p), label))
+            variants_to_send.append((Path(p), label))
 
-    if logo_variants:
+    if variants_to_send:
+        await context.bot.send_message(
+            chat_id=chat_id, text="🔤 *Logo variants*\\:", parse_mode=ParseMode.MARKDOWN_V2
+        )
+        media = [InputMediaPhoto(media=open(p, "rb"), caption=lbl) for p, lbl in variants_to_send]
+        try:
+            await context.bot.send_media_group(chat_id=chat_id, media=media)
+        except Exception:
+            for p, lbl in variants_to_send:
+                try:
+                    await context.bot.send_document(chat_id=chat_id, document=open(p, "rb"), filename=p.name, caption=lbl)
+                except Exception:
+                    pass
+
+    if svg_path and svg_path.exists():
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id, document=open(svg_path, "rb"),
+                filename=svg_path.name, caption="📐 Logo SVG vector",
+            )
+        except Exception as e:
+            logger.warning(f"SVG send failed: {e}")
+
+    # Store variant paths for ZIP export later
+    context.user_data["logo_variant_paths"] = logo_variant_paths
+    context.user_data["logo_svg_path"] = str(svg_path) if svg_path else None
+
+    # ── Step 2: Generate palette ──────────────────────────────────────────────
+    progress_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text="🎨 *Đang tạo bảng màu\\.\\.\\.*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+    def on_progress(msg: str) -> None:
+        asyncio.create_task(safe_edit(context, chat_id, progress_msg.message_id, msg))
+
+    palette_result = await runner.run_palette_phase(
+        direction=chosen_direction,
+        output_dir=output_dir,
+        brief_dir=brief_dir,
+        on_progress=on_progress,
+        refinement_feedback=refinement_feedback,
+    )
+
+    if not palette_result.success:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="🔤 *Logo versions*\\:",
+            text=f"❌ Palette thất bại\\:\n```\n{escape_md(palette_result.error[:400])}\n```",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        media = []
-        for p, label in logo_variants:
+        return
+
+    # Store palette data
+    context.user_data[ENRICHED_COLORS_KEY] = palette_result.enriched_colors
+    context.user_data[PALETTE_SHADES_KEY] = palette_result.palette_shades
+    context.user_data["palette_png"] = str(palette_result.palette_png) if palette_result.palette_png else None
+    context.user_data["shades_png"] = str(palette_result.shades_png) if palette_result.shades_png else None
+
+    # Send palette
+    if palette_result.palette_png and palette_result.palette_png.exists():
+        await safe_edit(context, chat_id, progress_msg.message_id, "✅ *Bảng màu hoàn thành\\!*")
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(palette_result.palette_png, "rb"),
+                filename=palette_result.palette_png.name,
+            )
+        except Exception as e:
+            logger.warning(f"Palette send failed: {e}")
+
+    if palette_result.shades_png and palette_result.shades_png.exists():
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(palette_result.shades_png, "rb"),
+                filename=palette_result.shades_png.name,
+                caption="🌈 Shade scales",
+            )
+        except Exception as e:
+            logger.warning(f"Shades send failed: {e}")
+
+    # ── Palette HITL keyboard ─────────────────────────────────────────────────
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Chốt bảng màu", callback_data="palette_accept")],
+        [InlineKeyboardButton("✏️ Chỉnh sửa", callback_data="palette_refine")],
+        [InlineKeyboardButton("🔄 Tạo lại", callback_data="palette_reroll")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="👆 *Bạn muốn giữ bảng màu này hay chỉnh sửa?*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    context.user_data[PALETTE_REVIEW_FLAG] = True
+
+
+# ── Palette HITL handlers ─────────────────────────────────────────────────────
+
+async def step_palette_review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle palette_accept / palette_refine / palette_reroll callbacks."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    chat_id = update.effective_chat.id
+
+    if data == "palette_accept":
+        context.user_data[PALETTE_REVIEW_FLAG] = False
+        await query.edit_message_text(
+            "✅ *Bảng màu đã được chốt\\!*\n\n🔲 Tiếp theo\\: tạo hoạ tiết \\(pattern\\)\\.\\.\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Move to pattern phase — ask for refs
+        await _start_pattern_ref_phase(context, chat_id)
+        return
+
+    if data == "palette_refine":
+        context.user_data[PALETTE_REVIEW_FLAG] = True
+        context.user_data["palette_refine_mode"] = True
+        await query.edit_message_text(
+            "✏️ Mô tả điều chỉnh bảng màu \\(vd: _\"ấm hơn\"_, _\"thêm xanh lá\"_, _\"bớt tím\"_\\)\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    if data == "palette_reroll":
+        context.user_data[PALETTE_REVIEW_FLAG] = False
+        await query.edit_message_text(
+            "🔄 *Đang tạo lại bảng màu\\.\\.\\.*",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Re-run palette phase with no specific feedback
+        _launch_palette_rerun(context, chat_id, refinement_feedback=None)
+        return
+
+
+async def step_palette_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle free-text palette refinement when PALETTE_REVIEW_FLAG is set."""
+    if not context.user_data.get(PALETTE_REVIEW_FLAG):
+        return
+
+    text = update.message.text.strip()
+    if not text:
+        return
+
+    chat_id = update.effective_chat.id
+    context.user_data[PALETTE_REVIEW_FLAG] = False
+    context.user_data.pop("palette_refine_mode", None)
+
+    progress_msg = await update.message.reply_text(
+        f"🔄 *Đang tạo lại bảng màu theo feedback\\.\\.\\.*\n\n"
+        f"_\"{escape_md(text[:100])}_\"",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    _launch_palette_rerun(context, chat_id, refinement_feedback=text)
+
+
+def _launch_palette_rerun(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    refinement_feedback: Optional[str],
+) -> None:
+    """Re-run palette generation with optional feedback."""
+    chosen_direction = context.user_data.get(CHOSEN_DIR_KEY)
+    output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
+    brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
+    brief_dir = Path(brief_dir_str) if brief_dir_str else None
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    brief = get_brief(context)
+    all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
+
+    # Find chosen assets
+    chosen_num = getattr(chosen_direction, "option_number", 1) if chosen_direction else 1
+    chosen_assets = all_assets.get(chosen_num)
+
+    asyncio.create_task(
+        _run_logo_variants_and_palette_phase(
+            context=context,
+            chat_id=chat_id,
+            chosen_direction=chosen_direction,
+            chosen_assets=chosen_assets,
+            output_dir=output_dir,
+            brief_dir=brief_dir,
+            brief=brief,
+            api_key=api_key,
+            refinement_feedback=refinement_feedback,
+        )
+    )
+
+
+# ── Pattern ref phase ─────────────────────────────────────────────────────────
+
+
+def _fetch_pattern_refs(brief, n: int = 4) -> list:
+    """
+    Pull n diverse pattern reference images based on brief keywords.
+    Returns list of Path objects. Falls back to empty list on any error.
+    """
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        project_root = _Path(__file__).parent.parent
+        refs_dir = project_root / "references" / "patterns"
+        if not refs_dir.exists():
+            return []
+
+        kw = list(getattr(brief, "keywords", []) or [])
+        product = getattr(brief, "product", "") or ""
+        audience = getattr(brief, "audience", "") or ""
+        tone = getattr(brief, "tone", "") or ""
+        kw_set = {w.lower() for w in kw + product.split() + audience.split() + tone.split() if len(w) > 2}
+
+        # Score every category dir using the KEYWORD_PATTERN_MAP from pattern_matcher
+        try:
+            from src.pattern_matcher import KEYWORD_PATTERN_MAP
+            keyword_boosts: dict = {}
+            for kw_item in kw_set:
+                for cat in KEYWORD_PATTERN_MAP.get(kw_item, []):
+                    keyword_boosts[cat] = keyword_boosts.get(cat, 0) + 3
+        except ImportError:
+            keyword_boosts = {}
+
+        scored: list = []
+        for sub in sorted(refs_dir.iterdir()):
+            if not sub.is_dir() or not (sub / "index.json").exists():
+                continue
+            cat_words = set(sub.name.lower().replace("-", "_").split("_"))
+            cat_words.discard("pattern")
+            cat_score = len(kw_set & cat_words)
+            folder_boost = keyword_boosts.get(sub.name, 0)
             try:
-                media.append(InputMediaPhoto(media=open(p, "rb"), caption=label))
+                index = _json.loads((sub / "index.json").read_text())
+                for fname, entry in index.items():
+                    tags = entry.get("tags", {})
+                    all_tags: set = set()
+                    for lst_key in ("motif", "style", "technique", "mood"):
+                        val = tags.get(lst_key, [])
+                        if isinstance(val, list):
+                            for t in val:
+                                all_tags.update(t.lower().split())
+                        elif isinstance(val, str):
+                            all_tags.update(val.lower().split())
+                    tag_overlap = len(kw_set & all_tags)
+                    quality = tags.get("quality", 5) if isinstance(tags.get("quality"), (int, float)) else 5
+                    score = folder_boost + cat_score * 2 + tag_overlap + quality / 10.0
+                    rel = entry.get("relative_path", "")
+                    absp = entry.get("local_path", "")
+                    resolved = str(project_root / rel) if rel else absp
+                    if resolved and _Path(resolved).exists():
+                        scored.append((score, sub.name, _Path(resolved)))
+            except Exception:
+                continue
+
+        if not scored:
+            return []
+
+        scored.sort(key=lambda x: -x[0])
+
+        result: list = []
+        seen_cats: set = set()
+        for score, cat, p in scored:
+            if cat not in seen_cats and len(result) < n:
+                result.append(p)
+                seen_cats.add(cat)
+        for score, cat, p in scored:
+            if p not in result and len(result) < n:
+                result.append(p)
+
+        return result[:n]
+    except Exception:
+        return []
+
+
+async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    """Ask user for pattern references: show suggestions + upload option + skip."""
+    brief = get_brief(context)
+
+    # Fetch pattern ref suggestions
+    ref_images = _fetch_pattern_refs(brief, n=4)
+    if ref_images:
+        from telegram import InputMediaPhoto
+        media = []
+        for i, p in enumerate(ref_images, 1):
+            try:
+                media.append(InputMediaPhoto(media=open(p, "rb"), caption=f"Pattern ref {i}"))
             except Exception:
                 pass
         if media:
             try:
                 await context.bot.send_media_group(chat_id=chat_id, media=media)
             except Exception:
-                for p, label in logo_variants:
-                    try:
-                        await context.bot.send_document(
-                            chat_id=chat_id,
-                            document=open(p, "rb"),
-                            filename=p.name,
-                            caption=label,
-                        )
-                    except Exception:
-                        pass
+                pass
 
-    # ── Step 3: Send palette + shades ────────────────────────────────────────
-    palette_png = result.palette_png or (getattr(assets, "palette_png", None) if assets else None)
-    shades_png  = getattr(assets, "shades_png", None) if assets else None
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Tôi muốn upload ref", callback_data="patref_upload")],
+        [InlineKeyboardButton("⏭ Bỏ qua, tạo luôn", callback_data="patref_skip")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "🔲 *Bước tiếp theo\\: Hoạ tiết \\(Pattern\\)*\n\n"
+            "Trên đây là 4 gợi ý pattern phù hợp với brief của bạn\\.\n\n"
+            "Bạn có thể\\:\n"
+            "• Upload ảnh pattern ref của riêng bạn\n"
+            "• Hoặc bỏ qua — bot sẽ tự chọn style phù hợp nhất\n\n"
+            "_Sau khi chọn ref, bạn có thể mô tả thêm về pattern mong muốn\\._"
+        ),
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    context.user_data[PATTERN_REF_FLAG] = True
+    context.user_data[PATTERN_REFS_KEY] = []
 
-    if palette_png and Path(palette_png).exists():
-        await context.bot.send_message(
-            chat_id=chat_id, text="🎨 *Color Palette*\\:", parse_mode=ParseMode.MARKDOWN_V2
+
+async def step_pattern_ref_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle patref_upload / patref_skip callbacks."""
+    if not context.user_data.get(PATTERN_REF_FLAG):
+        return
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    chat_id = update.effective_chat.id
+
+    if data == "patref_upload":
+        await query.edit_message_text(
+            "📷 *Gửi ảnh pattern ref của bạn\\.*\n"
+            "Gõ /done khi xong, hoặc /skip để bỏ qua\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
-        try:
-            await context.bot.send_document(
-                chat_id=chat_id,
-                document=open(palette_png, "rb"),
-                filename=Path(palette_png).name,
-            )
-        except Exception as e:
-            logger.warning(f"Palette send failed: {e}")
+        return
 
-    if shades_png and Path(shades_png).exists():
-        try:
-            await context.bot.send_document(
-                chat_id=chat_id,
-                document=open(shades_png, "rb"),
-                filename=Path(shades_png).name,
-                caption="🌈 Shade scales",
-            )
-        except Exception as e:
-            logger.warning(f"Shades send failed: {e}")
-
-    # ── Step 5: Send pattern ──────────────────────────────────────────────────
-    pattern = getattr(assets, "pattern", None) if assets else None
-    if pattern and Path(pattern).exists():
-        await context.bot.send_message(
-            chat_id=chat_id, text="🔲 *Pattern tile*\\:", parse_mode=ParseMode.MARKDOWN_V2
+    if data == "patref_skip":
+        context.user_data[PATTERN_REF_FLAG] = False
+        await query.edit_message_text(
+            "⏭ *Bỏ qua pattern ref\\.*",
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
+        # Ask for description
+        await _ask_pattern_description(context, chat_id)
+        return
+
+
+async def step_pattern_ref_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle pattern ref image uploads (global handler, group=1)."""
+    if not context.user_data.get(PATTERN_REF_FLAG):
+        return
+
+    img_path = await _download_image(update, context, "patref", len(context.user_data.get(PATTERN_REFS_KEY, [])))
+    if img_path:
+        refs = context.user_data.get(PATTERN_REFS_KEY, [])
+        refs.append(img_path)
+        context.user_data[PATTERN_REFS_KEY] = refs
+        await update.message.reply_text(
+            f"✅ Đã nhận {len(refs)} ảnh ref\\. Gửi thêm hoặc gõ /done\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+
+async def step_pattern_ref_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /done or /skip during pattern ref upload."""
+    if not context.user_data.get(PATTERN_REF_FLAG):
+        return
+
+    context.user_data[PATTERN_REF_FLAG] = False
+    chat_id = update.effective_chat.id
+    refs = context.user_data.get(PATTERN_REFS_KEY, [])
+    if refs:
+        await update.message.reply_text(
+            f"✅ Đã nhận {len(refs)} ảnh pattern ref\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+    await _ask_pattern_description(context, chat_id)
+
+
+async def _ask_pattern_description(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    """Ask user for optional text description of desired pattern."""
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏭ Bỏ qua, tạo luôn", callback_data="patdesc_skip")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "✏️ *Mô tả pattern mong muốn \\(tùy chọn\\)*\n\n"
+            "Ví dụ\\:\n"
+            "• _\"Hình lá cà phê xen kẽ với hạt cà phê, phong cách line art\"_\n"
+            "• _\"Geometric pattern tối giản, lấy cảm hứng từ kiến trúc\"_\n"
+            "• _\"Hoạ tiết organic mềm mại, phù hợp ngành mỹ phẩm\"_\n\n"
+            "Gõ mô tả hoặc nhấn bỏ qua\\."
+        ),
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    context.user_data[PATTERN_DESC_FLAG] = True
+
+
+async def step_pattern_desc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle patdesc_skip callback."""
+    if not context.user_data.get(PATTERN_DESC_FLAG):
+        return
+    query = update.callback_query
+    await query.answer()
+    chat_id = update.effective_chat.id
+
+    if query.data == "patdesc_skip":
+        context.user_data[PATTERN_DESC_FLAG] = False
+        await query.edit_message_text(
+            "⏭ *Bỏ qua mô tả — bot sẽ tự tạo pattern phù hợp nhất\\.*",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Launch pattern generation
+        asyncio.create_task(_run_pattern_generation(context, chat_id))
+        return
+
+
+async def step_pattern_desc_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle free-text pattern description when PATTERN_DESC_FLAG is set."""
+    if not context.user_data.get(PATTERN_DESC_FLAG):
+        return
+
+    text = update.message.text.strip()
+    if not text:
+        return
+
+    chat_id = update.effective_chat.id
+    context.user_data[PATTERN_DESC_FLAG] = False
+
+    # Store description
+    brief = get_brief(context)
+    brief.pattern_description = text
+
+    await update.message.reply_text(
+        f"✅ Đã ghi nhận mô tả\\: _\"{escape_md(text[:80])}\"_\n\n"
+        f"🔲 Đang tạo hoạ tiết\\.\\.\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    asyncio.create_task(_run_pattern_generation(context, chat_id))
+
+
+async def _run_pattern_generation(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    refinement_feedback: Optional[str] = None,
+) -> None:
+    """Generate pattern using refs + description + styleguide matching."""
+    chosen_direction = context.user_data.get(CHOSEN_DIR_KEY)
+    output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
+    brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
+    brief_dir = Path(brief_dir_str) if brief_dir_str else None
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    brief = get_brief(context)
+
+    pattern_refs = [Path(p) for p in context.user_data.get(PATTERN_REFS_KEY, []) if Path(p).exists()]
+    description = brief.pattern_description or None
+    palette_colors = context.user_data.get(ENRICHED_COLORS_KEY)
+
+    progress_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text="🔲 *Đang render hoạ tiết\\.\\.\\.*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+    runner = PipelineRunner(api_key=api_key)
+
+    def on_progress(msg: str) -> None:
+        asyncio.create_task(safe_edit(context, chat_id, progress_msg.message_id, msg))
+
+    result = await runner.run_pattern_phase(
+        direction=chosen_direction,
+        output_dir=output_dir,
+        brief_dir=brief_dir,
+        on_progress=on_progress,
+        pattern_refs=pattern_refs or None,
+        description=description,
+        palette_colors=palette_colors,
+        refinement_feedback=refinement_feedback,
+    )
+
+    if not result.success:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Pattern thất bại\\:\n```\n{escape_md(result.error[:400])}\n```",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    # Store pattern path
+    context.user_data["pattern_path"] = str(result.pattern_path) if result.pattern_path else None
+
+    # Send pattern
+    if result.pattern_path and result.pattern_path.exists():
+        await safe_edit(context, chat_id, progress_msg.message_id, "✅ *Hoạ tiết hoàn thành\\!*")
         try:
             await context.bot.send_document(
                 chat_id=chat_id,
-                document=open(pattern, "rb"),
-                filename=Path(pattern).name,
+                document=open(result.pattern_path, "rb"),
+                filename=result.pattern_path.name,
             )
         except Exception as e:
             logger.warning(f"Pattern send failed: {e}")
 
-    # ── Step 6: Mockups — composite each one and send immediately ─────────────
+    # Pattern HITL keyboard
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Chốt hoạ tiết", callback_data="pattern_accept")],
+        [InlineKeyboardButton("✏️ Chỉnh sửa", callback_data="pattern_refine")],
+        [InlineKeyboardButton("🔄 Tạo lại", callback_data="pattern_reroll")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="👆 *Bạn muốn giữ hoạ tiết này hay chỉnh sửa?*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    context.user_data[PATTERN_REVIEW_FLAG] = True
+
+
+# ── Pattern HITL handlers ─────────────────────────────────────────────────────
+
+async def step_pattern_review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle pattern_accept / pattern_refine / pattern_reroll callbacks."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    chat_id = update.effective_chat.id
+
+    if data == "pattern_accept":
+        context.user_data[PATTERN_REVIEW_FLAG] = False
+        await query.edit_message_text(
+            "✅ *Hoạ tiết đã được chốt\\!*\n\n🧩 Đang composite mockups\\.\\.\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Move to mockup + ZIP phase
+        asyncio.create_task(_run_mockup_and_zip_phase(context, chat_id))
+        return
+
+    if data == "pattern_refine":
+        context.user_data[PATTERN_REVIEW_FLAG] = True
+        context.user_data["pattern_refine_mode"] = True
+        await query.edit_message_text(
+            "✏️ Mô tả điều chỉnh hoạ tiết \\(vd: _\"thêm chi tiết\"_, _\"đơn giản hơn\"_, _\"đậm màu hơn\"_\\)\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    if data == "pattern_reroll":
+        context.user_data[PATTERN_REVIEW_FLAG] = False
+        await query.edit_message_text(
+            "🔄 *Đang tạo lại hoạ tiết\\.\\.\\.*",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        asyncio.create_task(_run_pattern_generation(context, chat_id, refinement_feedback=None))
+        return
+
+
+async def step_pattern_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle free-text pattern refinement when PATTERN_REVIEW_FLAG is set."""
+    if not context.user_data.get(PATTERN_REVIEW_FLAG):
+        return
+
+    text = update.message.text.strip()
+    if not text:
+        return
+
+    chat_id = update.effective_chat.id
+    context.user_data[PATTERN_REVIEW_FLAG] = False
+    context.user_data.pop("pattern_refine_mode", None)
+
+    await update.message.reply_text(
+        f"🔄 *Đang tạo lại hoạ tiết theo feedback\\.\\.\\.*\n\n"
+        f"_\"{escape_md(text[:100])}_\"",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    asyncio.create_task(_run_pattern_generation(context, chat_id, refinement_feedback=text))
+
+
+# ── Mockup + ZIP export phase ─────────────────────────────────────────────────
+
+async def _run_mockup_and_zip_phase(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+) -> None:
+    """
+    Final phase: composite mockups progressively, then export ZIP.
+    """
+    loop = asyncio.get_event_loop()
+    chosen_direction = context.user_data.get(CHOSEN_DIR_KEY)
+    output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
+    brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
+    brief_dir = Path(brief_dir_str) if brief_dir_str else None
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    brief = get_brief(context)
+    all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
+    chosen_num = getattr(chosen_direction, "option_number", 1) if chosen_direction else 1
+    chosen_assets = all_assets.get(chosen_num)
+
+    direction_name = escape_md(getattr(chosen_direction, "direction_name", ""))
+
+    # Patch chosen_assets with locked palette + pattern from HITL
+    if chosen_assets:
+        enriched_colors = context.user_data.get(ENRICHED_COLORS_KEY)
+        if enriched_colors:
+            chosen_assets.enriched_colors = enriched_colors
+        palette_png = context.user_data.get("palette_png")
+        if palette_png and Path(palette_png).exists():
+            chosen_assets.palette_png = Path(palette_png)
+        shades_png = context.user_data.get("shades_png")
+        if shades_png and Path(shades_png).exists():
+            chosen_assets.shades_png = Path(shades_png)
+        pattern_path = context.user_data.get("pattern_path")
+        if pattern_path and Path(pattern_path).exists():
+            chosen_assets.pattern = Path(pattern_path)
+        # Patch logo variants from HITL
+        logo_variants = context.user_data.get("logo_variant_paths", {})
+        for attr in ("logo_white", "logo_black", "logo_transparent"):
+            p = logo_variants.get(attr)
+            if p and Path(p).exists():
+                setattr(chosen_assets, attr, Path(p))
+
+    # ── Mockups — composite each one and send immediately ─────────────────────
     from src.mockup_compositor import get_processed_mockup_files, composite_single_mockup
 
     processed_files = get_processed_mockup_files()
-    if processed_files and assets:
+    mockup_paths = []
+
+    if processed_files and chosen_assets:
         await context.bot.send_message(
             chat_id=chat_id,
             text=f"🧩 *Mockups* — đang composite {len(processed_files)} ảnh\\.\\.\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        mockup_dir = (
-            Path(assets.background).parent / "mockups"
-            if assets.background and Path(assets.background).parent.exists()
-            else output_dir / "mockups"
-        )
-        mockup_count = 0
+        mockup_dir = output_dir / "mockups"
+        mockup_dir.mkdir(parents=True, exist_ok=True)
+
         for pf in processed_files:
             try:
                 composited = await loop.run_in_executor(
                     None,
                     lambda pf=pf: composite_single_mockup(
                         processed_file=pf,
-                        assets=assets,
+                        assets=chosen_assets,
                         api_key=api_key,
                         mockup_dir=mockup_dir,
                     ),
                 )
                 if composited and composited.exists():
+                    mockup_paths.append(composited)
                     try:
                         await context.bot.send_document(
                             chat_id=chat_id,
@@ -2081,7 +2619,6 @@ async def _run_pipeline_phase2(
                             filename=composited.name,
                             caption=f"🖼 Mockup: {pf.stem}",
                         )
-                        mockup_count += 1
                     except Exception as e:
                         logger.warning(f"Mockup send failed {pf.stem}: {e}")
             except Exception as e:
@@ -2089,11 +2626,53 @@ async def _run_pipeline_phase2(
     else:
         logger.info("No processed mockup files found — skipping mockup step")
 
+    # ── ZIP export ────────────────────────────────────────────────────────────
+    try:
+        from src.zip_exporter import create_brand_identity_zip
+
+        logo_paths_for_zip = {}
+        if chosen_assets:
+            for attr in ("logo", "logo_white", "logo_black", "logo_transparent"):
+                p = getattr(chosen_assets, attr, None)
+                if p and Path(p).exists():
+                    logo_paths_for_zip[attr] = Path(p)
+
+        palette_png_path = context.user_data.get("palette_png")
+        shades_png_path = context.user_data.get("shades_png")
+        pattern_path = context.user_data.get("pattern_path")
+        svg_path_str = context.user_data.get("logo_svg_path")
+        svg_path = Path(svg_path_str) if svg_path_str and Path(svg_path_str).exists() else None
+
+        zip_path = await loop.run_in_executor(
+            None,
+            lambda: create_brand_identity_zip(
+                brand_name=brief.brand_name,
+                output_dir=output_dir,
+                logo_paths=logo_paths_for_zip or None,
+                palette_png=Path(palette_png_path) if palette_png_path else None,
+                shades_png=Path(shades_png_path) if shades_png_path else None,
+                pattern_path=Path(pattern_path) if pattern_path else None,
+                mockup_paths=mockup_paths or None,
+                svg_path=svg_path,
+            ),
+        )
+
+        if zip_path and zip_path.exists():
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(zip_path, "rb"),
+                filename=zip_path.name,
+                caption=f"📦 Brand Identity Package — {brief.brand_name}",
+            )
+    except Exception as e:
+        logger.warning(f"ZIP export failed: {e}")
+
     # ── Done! ─────────────────────────────────────────────────────────────────
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
             f"🎉 *{escape_md(brief.brand_name)}* — *{direction_name}* hoàn thành\\!\n\n"
+            f"📦 Tất cả assets đã được đóng gói trong file ZIP\\.\n"
             f"Gõ /start để bắt đầu project mới\\."
         ),
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -2188,17 +2767,88 @@ def build_app(token: str) -> Application:
     app.add_handler(conv)
 
     # ── Global HITL handlers (outside ConversationHandler) ────────────────────
-    # These fire when the pipeline has finished Phase 1 and set LOGO_REVIEW_FLAG.
+    # These fire when pipeline phases set their respective *_FLAG.
     # They must be registered AFTER the ConversationHandler so they don't
-    # interfere with brief collection.
+    # interfere with brief collection. All in group=1.
+
+    # Logo HITL
     app.add_handler(
         CallbackQueryHandler(step_logo_review_callback, pattern="^logo_"),
         group=1,
     )
+
+    # Palette HITL
     app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, step_logo_review_text),
+        CallbackQueryHandler(step_palette_review_callback, pattern="^palette_"),
+        group=1,
+    )
+
+    # Pattern ref selection
+    app.add_handler(
+        CallbackQueryHandler(step_pattern_ref_callback, pattern="^patref_"),
+        group=1,
+    )
+
+    # Pattern description skip
+    app.add_handler(
+        CallbackQueryHandler(step_pattern_desc_callback, pattern="^patdesc_"),
+        group=1,
+    )
+
+    # Pattern review
+    app.add_handler(
+        CallbackQueryHandler(step_pattern_review_callback, pattern="^pattern_"),
+        group=1,
+    )
+
+    # Global text handler — dispatches to whichever HITL flag is active
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, _global_hitl_text_handler),
+        group=1,
+    )
+
+    # Global image handler for pattern ref uploads
+    app.add_handler(
+        MessageHandler(filters.PHOTO | filters.Document.IMAGE, _global_hitl_image_handler),
+        group=1,
+    )
+
+    # Global /done and /skip commands for pattern ref phase
+    app.add_handler(
+        CommandHandler("done", _global_hitl_done_handler),
+        group=1,
+    )
+    app.add_handler(
+        CommandHandler("skip", _global_hitl_done_handler),
         group=1,
     )
 
     app.add_error_handler(error_handler)
     return app
+
+
+# ── Global HITL dispatcher handlers ──────────────────────────────────────────
+
+async def _global_hitl_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Dispatch text messages to the appropriate HITL text handler based on active flags."""
+    if context.user_data.get(LOGO_REVIEW_FLAG):
+        await step_logo_review_text(update, context)
+    elif context.user_data.get(PALETTE_REVIEW_FLAG):
+        await step_palette_review_text(update, context)
+    elif context.user_data.get(PATTERN_DESC_FLAG):
+        await step_pattern_desc_text(update, context)
+    elif context.user_data.get(PATTERN_REVIEW_FLAG):
+        await step_pattern_review_text(update, context)
+    # else: ignore — not in any HITL mode
+
+
+async def _global_hitl_image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Dispatch image uploads to pattern ref handler if active."""
+    if context.user_data.get(PATTERN_REF_FLAG):
+        await step_pattern_ref_image(update, context)
+
+
+async def _global_hitl_done_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Dispatch /done and /skip commands to pattern ref handler if active."""
+    if context.user_data.get(PATTERN_REF_FLAG):
+        await step_pattern_ref_done(update, context)

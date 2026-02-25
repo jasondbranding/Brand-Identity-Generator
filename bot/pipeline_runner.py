@@ -71,6 +71,29 @@ class AssetsPhaseResult:
     elapsed_seconds: float = 0.0
 
 
+@dataclass
+class PalettePhaseResult:
+    """Output from palette generation phase."""
+    success: bool
+    output_dir: Path
+    enriched_colors: Optional[List[dict]] = None
+    palette_png: Optional[Path] = None
+    shades_png: Optional[Path] = None
+    palette_shades: Optional[dict] = None
+    error: str = ""
+    elapsed_seconds: float = 0.0
+
+
+@dataclass
+class PatternPhaseResult:
+    """Output from pattern generation phase."""
+    success: bool
+    output_dir: Path
+    pattern_path: Optional[Path] = None
+    error: str = ""
+    elapsed_seconds: float = 0.0
+
+
 # ── Progress callback type ────────────────────────────────────────────────────
 
 ProgressCallback = Callable[[str], None]   # sync, called from worker thread
@@ -272,6 +295,161 @@ class PipelineRunner:
                 error=f"{e}\n\n{traceback.format_exc()}",
                 elapsed_seconds=time.time() - start,
             )
+
+    # ── Phase: palette only ──────────────────────────────────────────────────
+
+    async def run_palette_phase(
+        self,
+        direction: object,
+        output_dir: Path,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback] = None,
+        refinement_feedback: Optional[str] = None,
+    ) -> "PalettePhaseResult":
+        """Generate palette + shades for one direction."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._run_palette_sync, direction, output_dir, brief_dir,
+            on_progress, refinement_feedback,
+        )
+
+    def _run_palette_sync(
+        self,
+        direction: object,
+        output_dir: Path,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback],
+        refinement_feedback: Optional[str] = None,
+    ) -> "PalettePhaseResult":
+        start = time.time()
+        try:
+            from src.parser import parse_brief
+            brief = parse_brief(str(brief_dir), mode="full")
+
+            self._progress(on_progress, "🎨 Đang tạo bảng màu\\.\\.\\.")
+            from src.generator import generate_palette_only
+            result = generate_palette_only(
+                direction=direction,
+                output_dir=output_dir,
+                brief_keywords=getattr(brief, "keywords", None),
+                brief_text=getattr(brief, "brief_text", ""),
+                refinement_feedback=refinement_feedback,
+            )
+
+            return PalettePhaseResult(
+                success=True,
+                output_dir=output_dir,
+                enriched_colors=result.get("enriched_colors"),
+                palette_png=result.get("palette_png"),
+                shades_png=result.get("shades_png"),
+                palette_shades=result.get("palette_shades"),
+                elapsed_seconds=time.time() - start,
+            )
+        except Exception as e:
+            import traceback
+            return PalettePhaseResult(
+                success=False,
+                output_dir=output_dir,
+                error=f"{e}\n\n{traceback.format_exc()}",
+                elapsed_seconds=time.time() - start,
+            )
+
+    # ── Phase: pattern only ──────────────────────────────────────────────────
+
+    async def run_pattern_phase(
+        self,
+        direction: object,
+        output_dir: Path,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback] = None,
+        pattern_refs: Optional[list] = None,
+        description: Optional[str] = None,
+        palette_colors: Optional[List[dict]] = None,
+        refinement_feedback: Optional[str] = None,
+    ) -> "PatternPhaseResult":
+        """Generate pattern for one direction, using styleguide matching + custom prompt."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._run_pattern_sync, direction, output_dir, brief_dir,
+            on_progress, pattern_refs, description, palette_colors, refinement_feedback,
+        )
+
+    def _run_pattern_sync(
+        self,
+        direction: object,
+        output_dir: Path,
+        brief_dir: Path,
+        on_progress: Optional[ProgressCallback],
+        pattern_refs: Optional[list] = None,
+        description: Optional[str] = None,
+        palette_colors: Optional[List[dict]] = None,
+        refinement_feedback: Optional[str] = None,
+    ) -> "PatternPhaseResult":
+        start = time.time()
+        try:
+            from src.parser import parse_brief
+            brief = parse_brief(str(brief_dir), mode="full")
+            style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
+
+            self._progress(on_progress, "🔲 Đang tạo hoạ tiết\\.\\.\\.")
+
+            # Build enhanced prompt via pattern_matcher if refs are available
+            custom_prompt = None
+            try:
+                from src.pattern_matcher import build_pattern_prompt
+                custom_prompt = build_pattern_prompt(
+                    direction=direction,
+                    brief_keywords=getattr(brief, "keywords", None),
+                    pattern_refs=pattern_refs,
+                    user_description=description,
+                    palette_colors=palette_colors,
+                    refinement_feedback=refinement_feedback,
+                )
+            except ImportError:
+                pass  # pattern_matcher not yet created — fall through to default
+            except Exception as e:
+                self._progress(on_progress, f"⚠️ Pattern prompt builder: {e}")
+
+            from src.generator import generate_pattern_only
+            pattern_path = generate_pattern_only(
+                direction=direction,
+                output_dir=output_dir,
+                brief_keywords=getattr(brief, "keywords", None),
+                brief_text=getattr(brief, "brief_text", ""),
+                moodboard_images=getattr(brief, "moodboard_images", None) or None,
+                style_ref_images=(pattern_refs or []) + (style_ref_images or []) or None,
+                custom_prompt=custom_prompt,
+                palette_colors=palette_colors,
+            )
+
+            return PatternPhaseResult(
+                success=True,
+                output_dir=output_dir,
+                pattern_path=pattern_path,
+                elapsed_seconds=time.time() - start,
+            )
+        except Exception as e:
+            import traceback
+            return PatternPhaseResult(
+                success=False,
+                output_dir=output_dir,
+                error=f"{e}\n\n{traceback.format_exc()}",
+                elapsed_seconds=time.time() - start,
+            )
+
+    # ── Phase: logo variants + SVG ───────────────────────────────────────────
+
+    async def run_logo_variants_phase(
+        self,
+        logo_path: Path,
+        output_dir: Path,
+    ) -> dict:
+        """Create white / black / transparent + SVG variants from logo PNG."""
+        loop = asyncio.get_event_loop()
+        from src.generator import create_logo_variants_and_svg
+        return await loop.run_in_executor(
+            None, create_logo_variants_and_svg, logo_path, output_dir,
+        )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

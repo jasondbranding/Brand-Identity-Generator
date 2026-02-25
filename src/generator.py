@@ -627,6 +627,205 @@ def _generate_direction_assets(
     )
 
 
+# ── Modular phase functions (called independently by HITL pipeline) ────────────
+
+
+def generate_palette_only(
+    direction: BrandDirection,
+    output_dir: Path,
+    brief_keywords: Optional[list] = None,
+    brief_text: str = "",
+    refinement_feedback: Optional[str] = None,
+) -> dict:
+    """
+    Generate palette + shade scales for one direction.
+    Returns dict with keys: enriched_colors, palette_png, palette_shades, shades_png.
+    """
+    from .director import BrandDirection as _BD
+    slug = _slugify(direction.direction_name)
+    asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+
+    effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
+
+    enriched_colors: Optional[List[dict]] = None
+    palette_png: Optional[Path] = None
+    palette_shades: Optional[Dict[str, Dict[int, str]]] = None
+    shades_png: Optional[Path] = None
+
+    try:
+        from .palette_fetcher import fetch_palette_for_direction
+        from .palette_renderer import render_palette
+
+        console.print("  [dim]Fetching curated color palette…[/dim]")
+        direction_color_dicts = [
+            {"hex": c.hex, "name": c.name, "role": c.role}
+            for c in direction.colors
+        ]
+
+        # If refinement feedback is given, adjust keywords
+        fetch_keywords = list(effective_keywords or [])
+        if refinement_feedback:
+            fetch_keywords.extend(refinement_feedback.lower().split())
+
+        enriched_colors = fetch_palette_for_direction(
+            keywords=fetch_keywords,
+            direction_colors=direction_color_dicts,
+        )
+
+        if enriched_colors:
+            palette_path = asset_dir / "palette.png"
+            render_palette(
+                colors=enriched_colors,
+                output_path=palette_path,
+                width=2400,
+                height=640,
+                direction_name=direction.direction_name,
+            )
+            if palette_path.exists() and palette_path.stat().st_size > 100:
+                palette_png = palette_path
+                console.print(
+                    f"  [green]✓ palette[/green] → {palette_path.name} "
+                    f"[dim]({len(enriched_colors)} colors, "
+                    f"source: {enriched_colors[0].get('source', 'ai')})[/dim]"
+                )
+    except Exception as _pe:
+        console.print(f"  [dim]Palette fetch skipped: {_pe}[/dim]")
+
+    try:
+        from .shade_generator import generate_palette_shades, render_shade_scale
+
+        console.print("  [dim]Generating shade scales…[/dim]")
+        colors_for_shades = enriched_colors if enriched_colors else [
+            {"hex": c.hex, "name": c.name, "role": c.role}
+            for c in direction.colors
+        ]
+        palette_shades = generate_palette_shades(colors_for_shades, use_api=True)
+
+        if palette_shades:
+            shades_path = asset_dir / "shades.png"
+            render_shade_scale(
+                palette_shades,
+                output_path=shades_path,
+                enriched_colors=colors_for_shades,
+                width=2400,
+            )
+            if shades_path.exists() and shades_path.stat().st_size > 100:
+                shades_png = shades_path
+                n_colors = len(palette_shades)
+                console.print(
+                    f"  [green]✓ shades[/green] → {shades_path.name} "
+                    f"[dim]({n_colors} colors × 11 stops)[/dim]"
+                )
+    except Exception as _se:
+        console.print(f"  [dim]Shade generation skipped: {_se}[/dim]")
+
+    return {
+        "enriched_colors": enriched_colors,
+        "palette_png": palette_png,
+        "palette_shades": palette_shades,
+        "shades_png": shades_png,
+    }
+
+
+def generate_pattern_only(
+    direction: BrandDirection,
+    output_dir: Path,
+    brief_keywords: Optional[list] = None,
+    brief_text: str = "",
+    moodboard_images: Optional[list] = None,
+    style_ref_images: Optional[list] = None,
+    custom_prompt: Optional[str] = None,
+    palette_colors: Optional[List[dict]] = None,
+) -> Optional[Path]:
+    """
+    Generate pattern for one direction. If custom_prompt is given, use it
+    instead of deriving from direction.pattern_spec.
+    Optionally injects palette colors into the prompt.
+    Returns Path to pattern.png or None.
+    """
+    slug = _slugify(direction.direction_name)
+    asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+
+    effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
+
+    if custom_prompt:
+        pattern_prompt = custom_prompt
+    else:
+        spec = getattr(direction, "pattern_spec", None)
+        if spec is not None:
+            try:
+                pattern_prompt = _pattern_spec_to_prompt(spec)
+            except Exception:
+                pattern_prompt = getattr(direction, "pattern_prompt", "") or ""
+        else:
+            pattern_prompt = getattr(direction, "pattern_prompt", "") or ""
+
+    # Inject palette color info if available
+    if palette_colors:
+        hex_list = [c.get("hex", "") for c in palette_colors if c.get("hex")]
+        if hex_list:
+            color_clause = f" Use EXACTLY these brand palette colors: {', '.join(hex_list)}."
+            pattern_prompt += color_clause
+
+    pattern = _generate_image(
+        prompt=pattern_prompt,
+        save_path=asset_dir / "pattern.png",
+        label="pattern",
+        size_hint="square tile, seamlessly repeatable",
+        brief_keywords=effective_keywords,
+        moodboard_images=moodboard_images,
+        style_ref_images=style_ref_images,
+    )
+    return pattern
+
+
+def create_logo_variants_and_svg(
+    logo_path: Path,
+    output_dir: Path,
+) -> dict:
+    """
+    Create white / black / transparent variants + SVG from a logo PNG.
+    Returns dict with keys: logo_white, logo_black, logo_transparent, logo_svg.
+    """
+    result = {}
+
+    if not logo_path or not logo_path.exists() or logo_path.stat().st_size < 100:
+        return result
+
+    # PNG variants (white / black / transparent)
+    variants = _create_logo_variants(logo_path, output_dir)
+    result.update(variants)
+
+    # SVG via vtracer
+    try:
+        import vtracer
+        svg_path = output_dir / "logo.svg"
+        vtracer.convert_image_to_svg_py(
+            str(logo_path),
+            str(svg_path),
+            colormode="color",
+            hierarchical="stacked",
+            mode="spline",
+            filter_speckle=4,
+            color_precision=6,
+            layer_difference=16,
+            corner_threshold=60,
+            length_threshold=4.0,
+            max_iterations=10,
+            splice_threshold=45,
+            path_precision=3,
+        )
+        if svg_path.exists() and svg_path.stat().st_size > 100:
+            result["logo_svg"] = svg_path
+            console.print(f"  [green]✓ SVG[/green] → {svg_path.name}")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ SVG conversion failed: {e}[/yellow]")
+
+    return result
+
+
 def _try_imagen(
     prompt: str,
     api_key: str,
