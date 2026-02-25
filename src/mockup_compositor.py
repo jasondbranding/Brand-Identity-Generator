@@ -1319,19 +1319,20 @@ MOCKUP_PROMPTS: Dict[str, Dict] = {
     },
     "tote_bag": {
         "goal": (
-            "Replace the existing logo screen-printed on the canvas tote bag with the provided "
-            "brand logo. Maintain exact size, position, canvas fabric texture interaction, "
-            "and print style. Only change the logo artwork."
+            "Place the provided brand logo as a screen-print on the front panel of the dark/black "
+            "canvas tote bag. Use WHITE ink so the logo is clearly visible against the dark fabric. "
+            "Maintain authentic screen-print texture — canvas weave visible through the ink. "
+            "Keep the bag shape, handles, strap, and background exactly as-is."
         ),
-        "placeholder_description": "existing screen-printed logo on natural canvas tote bag front panel",
+        "placeholder_description": "blank dark/black canvas tote bag front panel — place logo here",
         "logo_replacement": {
             "replace_existing_logo": True,
             "maintain_exact_position": True,
             "maintain_exact_size": True,
             "convert_style": {
-                "type": "screen-print on canvas",
-                "ink_color": "contrasting with natural canvas (dark ink on light canvas)",
-                "fabric_texture": "canvas weave visible through ink",
+                "type": "screen-print on dark canvas",
+                "ink_color": "WHITE — logo must be white on dark/black bag for contrast",
+                "fabric_texture": "dark canvas weave visible through white ink",
                 "ink_opacity": "semi-opaque, authentic screen-print look",
                 "finish": "eco merchandise print quality",
             },
@@ -1342,12 +1343,13 @@ MOCKUP_PROMPTS: Dict[str, Dict] = {
             "lighting": {"preserve_direction": True, "preserve_shadows": True},
         },
         "constraints": [
-            "only replace the logo print on the bag face",
-            "keep canvas texture visible through the ink",
+            "logo ink must be WHITE — not black, not dark",
+            "keep bag color (dark/black) identical — do not lighten the bag",
+            "keep canvas texture visible through the white ink",
             "keep bag shape, color, handles identical",
             "no watermark",
         ],
-        "style": "eco merchandise, casual lifestyle, photorealistic canvas fabric",
+        "style": "eco merchandise, casual lifestyle, photorealistic dark canvas fabric",
     },
     "tshirt": {
         "goal": (
@@ -1931,13 +1933,24 @@ def composite_single_mockup(
         mockup_key = MOCKUP_KEY_MAP.get(processed_file.name, "")
         prompt = build_mockup_prompt(mockup_key, assets, brand_name, zone_text=zone_text)
 
-        logo_for_ai = (
-            assets.logo_transparent
-            if (assets.logo_transparent
-                and assets.logo_transparent.exists()
-                and assets.logo_transparent.stat().st_size > 100)
-            else assets.logo
-        )
+        # Dark-background mockups need the white logo for contrast
+        DARK_BG_MOCKUPS = {"tote_bag_processed.jpg", "black_shirt_logo_processed.png"}
+        if processed_file.name in DARK_BG_MOCKUPS:
+            logo_for_ai = (
+                assets.logo_white
+                if (assets.logo_white
+                    and assets.logo_white.exists()
+                    and assets.logo_white.stat().st_size > 100)
+                else assets.logo
+            )
+        else:
+            logo_for_ai = (
+                assets.logo_transparent
+                if (assets.logo_transparent
+                    and assets.logo_transparent.exists()
+                    and assets.logo_transparent.stat().st_size > 100)
+                else assets.logo
+            )
 
         ai_bytes = _ai_reconstruct_with_retry(
             original_path=original_path,
