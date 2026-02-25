@@ -471,14 +471,20 @@ def _generate_image(
 
 def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: int = 3) -> list:
     """
-    Find locally cached reference images that match brand keywords.
+    Find reference images that match brand keywords — with guaranteed cross-category diversity.
 
     Strategy:
-      1. Score every category subdir by keyword overlap with its folder name
-         (e.g. brief has "fashion" → industry_fashion_beauty scores high)
-      2. Load index.json from each indexed category, score each image by
-         tag overlap + quality
-      3. Return top_n best-matching images as Path objects
+      1. Score every category subdir by keyword overlap with its folder name.
+         Categories with ANY match are "relevant categories".
+      2. Score each image within those categories by tag overlap + quality.
+      3. Guarantee diversity: pick the best image from each relevant category first
+         (up to top_n categories), then fill remaining slots from global top scorers.
+
+    This means a brief for "premium fintech" can pull:
+      industry_finance_crypto  → real-world fintech logo craft
+      style_minimal_geometric  → visual geometry language
+      style_elegant_editorial  → premium refinement cues
+    ...and the model sees cross-category creative tension, producing richer originals.
 
     Handles both new relative_path and legacy local_path in index entries.
     """
@@ -491,34 +497,35 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: 
 
         import json as _json
         kw_set = {k.lower().strip() for k in brief_keywords if k}
-        scored_images: list = []
 
-        # ── Collect all indexes: top-level + category subdirs ──────────────
-        index_dirs = []
+        # ── Collect all indexed category dirs + their relevance score ──────
+        index_dirs: list = []
 
-        # Top-level index (legacy flat structure)
         if (refs_dir / "index.json").exists():
-            index_dirs.append((refs_dir, 0.0))   # no category bonus
+            index_dirs.append((refs_dir, 0.0, "root"))
 
-        # Category subdirs — score by name overlap with keywords
-        for sub in refs_dir.iterdir():
+        for sub in sorted(refs_dir.iterdir()):
             if not sub.is_dir() or sub.name.startswith(".") or sub.name.startswith("_"):
                 continue
             if not (sub / "index.json").exists():
                 continue
-            # Score: how many kw words appear in the category folder name
             cat_words = set(sub.name.lower().replace("-", "_").split("_"))
-            cat_bonus = len(kw_set & cat_words) * 2.0   # category match is a strong signal
-            index_dirs.append((sub, cat_bonus))
+            cat_score = len(kw_set & cat_words) * 2.0
+            index_dirs.append((sub, cat_score, sub.name))
 
         if not index_dirs:
             return []
 
-        # Sort by category relevance so best categories are searched first
-        index_dirs.sort(key=lambda x: -x[1])
+        # Sort: relevant categories first (score > 0), then the rest by name
+        index_dirs.sort(key=lambda x: (-x[1], x[2]))
 
-        # ── Score images across all categories ─────────────────────────────
-        for cat_dir, cat_bonus in index_dirs:
+        # ── Score images per category, keep per-category best ──────────────
+        # cat_best  → best (score, Path) per category for diversity guarantee
+        # all_scored → global pool for fill-in slots
+        cat_best: dict   = {}   # cat_name → (score, Path)
+        all_scored: list = []   # (score, cat_name, Path)
+
+        for cat_dir, cat_bonus, cat_name in index_dirs:
             try:
                 index = _json.loads((cat_dir / "index.json").read_text())
             except Exception:
@@ -526,36 +533,64 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: 
 
             for filename, entry in index.items():
                 tags = entry.get("tags", {})
-                # Aggregate all tag values into a flat set
                 all_tags: set = set()
                 for lst_key in ("style", "industry", "mood", "technique"):
                     for t in tags.get(lst_key, []):
                         all_tags.update(t.lower().split())
-                # Also include form/motif as tags
                 all_tags.add(str(tags.get("form", tags.get("motif", ""))).lower())
 
                 tag_overlap = len(kw_set & all_tags)
                 quality     = tags.get("quality", 5)
                 score       = cat_bonus + tag_overlap + quality / 10.0
 
-                # Resolve path: new relative_path → legacy local_path
-                rel   = entry.get("relative_path", "")
-                abs_p = entry.get("local_path", "")
+                rel      = entry.get("relative_path", "")
+                abs_p    = entry.get("local_path", "")
                 resolved = str(project_root / rel) if rel else abs_p
 
                 if resolved and Path(resolved).exists():
-                    scored_images.append((score, Path(resolved)))
+                    p = Path(resolved)
+                    all_scored.append((score, cat_name, p))
+                    # Track best image per category
+                    if cat_name not in cat_best or score > cat_best[cat_name][0]:
+                        cat_best[cat_name] = (score, p)
 
-        # ── Return top_n highest-scoring ───────────────────────────────────
-        scored_images.sort(key=lambda x: -x[0])
-        result = [p for _, p in scored_images[:top_n]]
+        if not all_scored:
+            return []
+
+        # ── Build result with cross-category diversity guarantee ───────────
+        # Step 1: one best image from each relevant category (score > 0), up to top_n
+        relevant_cats = [
+            (score, name) for name, (score, _) in cat_best.items() if score > 0
+        ]
+        relevant_cats.sort(key=lambda x: -x[0])
+
+        result: list   = []
+        used_cats: set = set()
+
+        for _, cat_name in relevant_cats[:top_n]:
+            _, p = cat_best[cat_name]
+            result.append(p)
+            used_cats.add(cat_name)
+            if len(result) >= top_n:
+                break
+
+        # Step 2: fill remaining slots from global top scorers (any category)
+        if len(result) < top_n:
+            all_scored.sort(key=lambda x: -x[0])
+            already = {str(p) for p in result}
+            for score, cat_name, p in all_scored:
+                if str(p) not in already:
+                    result.append(p)
+                    already.add(str(p))
+                    used_cats.add(cat_name)
+                if len(result) >= top_n:
+                    break
 
         if result:
-            cats_used = set()
-            for p in result:
-                cats_used.add(p.parent.name)
+            cats_display = ", ".join(sorted(used_cats))
+            blend_note   = " [blended]" if len(used_cats) > 1 else ""
             console.print(
-                f"  [dim]ref images: {len(result)} from {', '.join(sorted(cats_used))}[/dim]"
+                f"  [dim]ref images: {len(result)} from {cats_display}{blend_note}[/dim]"
             )
         return result
 
@@ -563,18 +598,28 @@ def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: 
         return []
 
 
-def _get_style_guide(brief_keywords: Optional[list], label: str) -> str:
+def _get_style_guide(brief_keywords: Optional[list], label: str, top_n: int = 3) -> str:
     """
-    Find the most relevant style guide (.md) from styles/logos/ or styles/patterns/
-    based on brief keywords matching the category name.
+    Find and COMBINE the top-N most relevant style guides for this label type.
 
-    Returns guide content as a string, or "" if none found.
+    Instead of returning a single best-match guide, blends multiple relevant
+    guides so the model works at the intersection of several visual languages.
+
+    Example: "premium fintech minimal" could blend:
+      industry_finance_crypto  → domain-specific rules (precision, trust)
+      style_minimal_geometric  → formal geometry constraints
+      style_elegant_editorial  → refinement / luxury cues
+    → Combined, the model has richer, more specific constraints than any single guide.
+
+    Each contributing guide is capped at 25 lines to prevent prompt bloat.
+    Total output is capped at ~100 lines.
+    Returns "" if no guides match.
     """
     if not brief_keywords:
         return ""
     try:
         project_root = Path(__file__).parent.parent
-        guide_type = "logos" if label in ("logo",) else "patterns" if label == "pattern" else None
+        guide_type = "logos" if label == "logo" else "patterns" if label == "pattern" else None
         if not guide_type:
             return ""
 
@@ -583,21 +628,50 @@ def _get_style_guide(brief_keywords: Optional[list], label: str) -> str:
             return ""
 
         kw_set = {k.lower().strip() for k in brief_keywords if k}
-        best_score = 0
-        best_content = ""
+        scored_guides: list = []   # (score, stem_name, content)
 
-        for guide_path in guides_dir.glob("*.md"):
-            # Score by how many brief keywords appear in the category name
+        for guide_path in sorted(guides_dir.glob("*.md")):
             cat_words = set(guide_path.stem.lower().replace("_", " ").split())
             score = len(kw_set & cat_words)
-            if score > best_score:
-                best_score = score
+            if score > 0:
                 try:
-                    best_content = guide_path.read_text(encoding="utf-8")
+                    content = guide_path.read_text(encoding="utf-8")
+                    scored_guides.append((score, guide_path.stem, content))
                 except Exception:
                     pass
 
-        return best_content if best_score > 0 else ""
+        if not scored_guides:
+            return ""
+
+        scored_guides.sort(key=lambda x: -x[0])
+        top_guides = scored_guides[:top_n]
+
+        if len(top_guides) == 1:
+            # Single match — return as-is (no blending needed)
+            return top_guides[0][2]
+
+        # ── Blend multiple guides ──────────────────────────────────────────
+        # Cap each guide to 25 actionable lines (skip YAML frontmatter)
+        LINE_CAP = 25
+        parts = []
+        for _, stem_name, content in top_guides:
+            readable_name = stem_name.replace("_", " ").title()
+            lines = [
+                l for l in content.splitlines()
+                if not l.startswith("---") and l.strip()
+            ][:LINE_CAP]
+            parts.append(
+                f"### {readable_name}\n" + "\n".join(lines)
+            )
+
+        blend_names = ", ".join(g[1] for g in top_guides)
+        console.print(f"  [dim]style guides blended: {blend_names}[/dim]")
+
+        return (
+            "## BLENDED STYLE REFERENCE\n"
+            f"_(synthesised from: {blend_names})_\n\n"
+            + "\n\n---\n\n".join(parts)
+        )
 
     except Exception:
         return ""
