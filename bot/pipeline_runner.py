@@ -148,9 +148,9 @@ class PipelineRunner:
         start = time.time()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path("outputs") / f"bot_{timestamp}"
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
+            output_dir.mkdir(parents=True, exist_ok=True)
             self._progress(on_progress, "📋 *Step 1/3* — Đang đọc brief\\.\\.\\.")
             from src.parser import parse_brief
             brief = parse_brief(str(brief_dir), mode="full")

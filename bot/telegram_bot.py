@@ -1793,6 +1793,47 @@ async def _run_pipeline_phase1(
     refinement_feedback: Optional[str] = None,
 ) -> None:
     """Run Phase 1: concept ideation + director + 4 logos only. Then enter HITL selection."""
+    import traceback as _tb
+    try:
+        await _run_pipeline_phase1_inner(
+            context=context,
+            chat_id=chat_id,
+            progress_msg_id=progress_msg_id,
+            brief=brief,
+            brief_dir=brief_dir,
+            api_key=api_key,
+            refinement_feedback=refinement_feedback,
+        )
+    except Exception as _top_err:
+        logger.error("_run_pipeline_phase1 crashed", exc_info=True)
+        tb_lines = _tb.format_exception(type(_top_err), _top_err, _top_err.__traceback__)
+        tb_last = "".join(tb_lines[-3:])[:400]
+        err_type = type(_top_err).__name__
+        err_msg = str(_top_err)[:200]
+        debug_text = (
+            f"❌ *Lỗi pipeline phase 1* \\(`{escape_md(err_type)}`\\)\n\n"
+            f"`{escape_md(err_msg)}`\n\n"
+            f"_Traceback \\(last 3 frames\\):_\n```\n{escape_md(tb_last)}\n```"
+        )
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=debug_text, parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Pipeline lỗi: {err_type}: {err_msg}\n\nGõ /cancel rồi /start để thử lại.",
+            )
+
+
+async def _run_pipeline_phase1_inner(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    progress_msg_id: int,
+    brief: ConversationBrief,
+    brief_dir: Path,
+    api_key: str,
+    refinement_feedback: Optional[str] = None,
+) -> None:
+    """Inner implementation of Phase 1 (called by _run_pipeline_phase1)."""
 
     def on_progress(msg: str) -> None:
         asyncio.create_task(safe_edit(context, chat_id, progress_msg_id, msg))
