@@ -2363,175 +2363,20 @@ async def _run_palette_only_phase(
 # ── Pattern ref phase ─────────────────────────────────────────────────────────
 
 
-def _fetch_pattern_refs(brief, n: int = 4) -> list:
-    """
-    Pull n diverse pattern reference images based on brief keywords.
-    Returns list of Path objects. Falls back to empty list on any error.
-    """
-    try:
-        import json as _json
-        from pathlib import Path as _Path
-        project_root = _Path(__file__).parent.parent
-        refs_dir = project_root / "references" / "patterns"
-        if not refs_dir.exists():
-            return []
-
-        kw = list(getattr(brief, "keywords", []) or [])
-        product = getattr(brief, "product", "") or ""
-        audience = getattr(brief, "audience", "") or ""
-        tone = getattr(brief, "tone", "") or ""
-        # Build keyword set — include individual words AND bigrams for Vietnamese
-        all_words = kw + product.split() + audience.split() + tone.split()
-        kw_set = {w.lower() for w in all_words if len(w) > 1}
-        for field_text in [product, audience, tone]:
-            words = field_text.lower().split()
-            for i in range(len(words) - 1):
-                kw_set.add(f"{words[i]} {words[i+1]}")
-
-        # Score every category dir using the KEYWORD_PATTERN_MAP from pattern_matcher
-        try:
-            from src.pattern_matcher import KEYWORD_PATTERN_MAP
-            keyword_boosts: dict = {}
-            for kw_item in kw_set:
-                for cat in KEYWORD_PATTERN_MAP.get(kw_item, []):
-                    keyword_boosts[cat] = keyword_boosts.get(cat, 0) + 3
-        except ImportError:
-            keyword_boosts = {}
-
-        # ── Weighted tag scoring ─────────────────────────────────────────
-        # motif + style  → high-signal (directly describes visual content)
-        # technique       → medium-signal
-        # mood + industry → low-signal (generic words shared across all categories)
-        _HIGH_WEIGHT_KEYS = ("motif", "style")
-        _MED_WEIGHT_KEYS  = ("technique",)
-        _LOW_WEIGHT_KEYS  = ("mood", "industry")
-
-        def _collect_tag_words(tags_dict, keys):
-            words: set = set()
-            for k in keys:
-                val = tags_dict.get(k, [])
-                if isinstance(val, list):
-                    for t in val:
-                        words.update(t.lower().split())
-                elif isinstance(val, str):
-                    words.update(val.lower().split())
-            return words
-
-        scored: list = []
-        for sub in sorted(refs_dir.iterdir()):
-            if not sub.is_dir() or not (sub / "index.json").exists():
-                continue
-            cat_words = set(sub.name.lower().replace("-", "_").split("_"))
-            cat_words.discard("pattern")
-            cat_score = len(kw_set & cat_words)
-            folder_boost = keyword_boosts.get(sub.name, 0)
-            try:
-                index = _json.loads((sub / "index.json").read_text())
-                for fname, entry in index.items():
-                    tags = entry.get("tags", {})
-                    high_tags = _collect_tag_words(tags, _HIGH_WEIGHT_KEYS)
-                    med_tags  = _collect_tag_words(tags, _MED_WEIGHT_KEYS)
-                    low_tags  = _collect_tag_words(tags, _LOW_WEIGHT_KEYS)
-                    high_overlap = len(kw_set & high_tags)
-                    med_overlap  = len(kw_set & med_tags)
-                    low_overlap  = len(kw_set & low_tags)
-                    # Weighted overlap: motif/style ×3, technique ×1, mood/industry ×0.3
-                    weighted_overlap = high_overlap * 3 + med_overlap * 1 + low_overlap * 0.3
-                    quality = tags.get("quality", 5) if isinstance(tags.get("quality"), (int, float)) else 5
-                    score = folder_boost + cat_score * 2 + weighted_overlap + quality / 10.0
-                    rel = entry.get("relative_path", "")
-                    absp = entry.get("local_path", "")
-                    resolved = str(project_root / rel) if rel else absp
-                    if resolved and _Path(resolved).exists():
-                        scored.append((score, sub.name, _Path(resolved), high_overlap))
-            except Exception:
-                continue
-
-        if not scored:
-            return []
-
-        scored.sort(key=lambda x: -x[0])
-
-        # Filter: require minimum score AND at least 1 high-signal tag overlap
-        # (motif or style). Generic mood/industry alone is NOT enough.
-        MIN_RELEVANCE_SCORE = 5.0
-        scored = [
-            (s, cat, p, ho)
-            for s, cat, p, ho in scored
-            if s >= MIN_RELEVANCE_SCORE and ho > 0
-        ]
-
-        if not scored:
-            return []
-
-        result: list = []
-        seen_cats: set = set()
-        for score, cat, p, _to in scored:
-            if cat not in seen_cats and len(result) < n:
-                result.append(p)
-                seen_cats.add(cat)
-        for score, cat, p, _to in scored:
-            if p not in result and len(result) < n:
-                result.append(p)
-
-        return result[:n]
-    except Exception:
-        return []
-
-
 async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
-    """Ask user for pattern references: show suggestions + upload option + skip."""
-    brief = get_brief(context)
-
-    # Fetch pattern ref suggestions
-    ref_images = _fetch_pattern_refs(brief, n=4)
-    # Store suggestion paths so callback can retrieve them by index
-    context.user_data["pattern_suggestion_paths"] = [str(p) for p in ref_images] if ref_images else []
-
-    if ref_images:
-        from telegram import InputMediaPhoto
-        media = []
-        for i, p in enumerate(ref_images, 1):
-            try:
-                media.append(InputMediaPhoto(media=p.read_bytes(), caption=f"Pattern ref {i}"))
-            except Exception:
-                pass
-        if media:
-            try:
-                await context.bot.send_media_group(chat_id=chat_id, media=media)
-            except Exception:
-                pass
-
-    # Build keyboard with selection buttons for each suggested ref
-    rows = []
-    if ref_images:
-        select_row = [
-            InlineKeyboardButton(f"✅ Chọn {i}", callback_data=f"patref_select_{i}")
-            for i in range(1, len(ref_images) + 1)
-        ]
-        rows.append(select_row)
-    rows.append([InlineKeyboardButton("📷 Upload ref riêng", callback_data="patref_upload")])
-    rows.append([InlineKeyboardButton("⏭ Bỏ qua, tạo luôn", callback_data="patref_skip")])
-
+    """Ask user to upload pattern refs or skip — no bot suggestions."""
+    rows = [
+        [InlineKeyboardButton("📷 Upload ref riêng", callback_data="patref_upload")],
+        [InlineKeyboardButton("⏭ Bỏ qua, tạo luôn", callback_data="patref_skip")],
+    ]
     kb = InlineKeyboardMarkup(rows)
     text_msg = (
         "🔲 *Bước tiếp theo\\: Hoạ tiết \\(Pattern\\)*\n\n"
+        "Bạn có ảnh pattern ref muốn dùng không?\n\n"
+        "• Upload ảnh pattern ref của riêng bạn\n"
+        "• Hoặc bỏ qua — bot sẽ tự tạo style phù hợp nhất\n\n"
+        "_Gửi ảnh xong gõ /done\\._"
     )
-    if ref_images:
-        text_msg += (
-            "Trên đây là gợi ý pattern phù hợp với brief của bạn\\.\n\n"
-            "Bạn có thể\\:\n"
-            "• Chọn 1 trong các ref gợi ý ở trên\n"
-            "• Upload ảnh pattern ref của riêng bạn\n"
-            "• Hoặc bỏ qua — bot sẽ tự chọn style phù hợp nhất\n\n"
-            "_Sau khi chọn ref, bạn có thể mô tả thêm về pattern mong muốn\\._"
-        )
-    else:
-        text_msg += (
-            "Upload ảnh pattern ref hoặc bỏ qua để bot tự tạo\\.\n\n"
-            "_Bạn có thể mô tả thêm về pattern mong muốn sau bước này\\._"
-        )
-
     await context.bot.send_message(
         chat_id=chat_id,
         text=text_msg,
@@ -2549,33 +2394,6 @@ async def step_pattern_ref_callback(update: Update, context: ContextTypes.DEFAUL
     data = query.data
     chat_id = update.effective_chat.id
     logger.info(f"Pattern ref callback: {data}, flag={context.user_data.get(PATTERN_REF_FLAG)}")
-
-    # ── User selected a suggested pattern ref ─────────────────────────────────
-    if data.startswith("patref_select_"):
-        try:
-            idx = int(data.split("_")[-1]) - 1  # 0-based
-        except (ValueError, IndexError):
-            return
-        suggestion_paths = context.user_data.get("pattern_suggestion_paths", [])
-        if 0 <= idx < len(suggestion_paths):
-            from pathlib import Path as _Path
-            selected_path = _Path(suggestion_paths[idx])
-            if selected_path.exists():
-                context.user_data[PATTERN_REFS_KEY] = [str(selected_path)]
-                context.user_data[PATTERN_REF_FLAG] = False
-                await query.edit_message_text(
-                    f"✅ *Đã chọn pattern ref {idx + 1}\\!*",
-                    parse_mode=ParseMode.MARKDOWN_V2,
-                )
-                await _ask_pattern_description(context, chat_id)
-                return
-        await query.edit_message_text(
-            "❌ Ref không hợp lệ\\. Bỏ qua\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        context.user_data[PATTERN_REF_FLAG] = False
-        await _ask_pattern_description(context, chat_id)
-        return
 
     if data == "patref_upload":
         # Ensure flag is set so image handler picks up uploads
