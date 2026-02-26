@@ -2398,6 +2398,25 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
         except ImportError:
             keyword_boosts = {}
 
+        # ── Weighted tag scoring ─────────────────────────────────────────
+        # motif + style  → high-signal (directly describes visual content)
+        # technique       → medium-signal
+        # mood + industry → low-signal (generic words shared across all categories)
+        _HIGH_WEIGHT_KEYS = ("motif", "style")
+        _MED_WEIGHT_KEYS  = ("technique",)
+        _LOW_WEIGHT_KEYS  = ("mood", "industry")
+
+        def _collect_tag_words(tags_dict, keys):
+            words: set = set()
+            for k in keys:
+                val = tags_dict.get(k, [])
+                if isinstance(val, list):
+                    for t in val:
+                        words.update(t.lower().split())
+                elif isinstance(val, str):
+                    words.update(val.lower().split())
+            return words
+
         scored: list = []
         for sub in sorted(refs_dir.iterdir()):
             if not sub.is_dir() or not (sub / "index.json").exists():
@@ -2410,22 +2429,21 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
                 index = _json.loads((sub / "index.json").read_text())
                 for fname, entry in index.items():
                     tags = entry.get("tags", {})
-                    all_tags: set = set()
-                    for lst_key in ("motif", "style", "technique", "mood", "industry"):
-                        val = tags.get(lst_key, [])
-                        if isinstance(val, list):
-                            for t in val:
-                                all_tags.update(t.lower().split())
-                        elif isinstance(val, str):
-                            all_tags.update(val.lower().split())
-                    tag_overlap = len(kw_set & all_tags)
+                    high_tags = _collect_tag_words(tags, _HIGH_WEIGHT_KEYS)
+                    med_tags  = _collect_tag_words(tags, _MED_WEIGHT_KEYS)
+                    low_tags  = _collect_tag_words(tags, _LOW_WEIGHT_KEYS)
+                    high_overlap = len(kw_set & high_tags)
+                    med_overlap  = len(kw_set & med_tags)
+                    low_overlap  = len(kw_set & low_tags)
+                    # Weighted overlap: motif/style ×3, technique ×1, mood/industry ×0.3
+                    weighted_overlap = high_overlap * 3 + med_overlap * 1 + low_overlap * 0.3
                     quality = tags.get("quality", 5) if isinstance(tags.get("quality"), (int, float)) else 5
-                    score = folder_boost + cat_score * 2 + tag_overlap + quality / 10.0
+                    score = folder_boost + cat_score * 2 + weighted_overlap + quality / 10.0
                     rel = entry.get("relative_path", "")
                     absp = entry.get("local_path", "")
                     resolved = str(project_root / rel) if rel else absp
                     if resolved and _Path(resolved).exists():
-                        scored.append((score, sub.name, _Path(resolved), tag_overlap))
+                        scored.append((score, sub.name, _Path(resolved), high_overlap))
             except Exception:
                 continue
 
@@ -2434,14 +2452,13 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
 
         scored.sort(key=lambda x: -x[0])
 
-        # Filter out low-relevance refs — require BOTH a minimum score AND
-        # at least 1 tag-level keyword overlap.  Category / folder boost alone
-        # is no longer enough; content must actually match the brief.
+        # Filter: require minimum score AND at least 1 high-signal tag overlap
+        # (motif or style). Generic mood/industry alone is NOT enough.
         MIN_RELEVANCE_SCORE = 5.0
         scored = [
-            (s, cat, p, to)
-            for s, cat, p, to in scored
-            if s >= MIN_RELEVANCE_SCORE and to > 0
+            (s, cat, p, ho)
+            for s, cat, p, ho in scored
+            if s >= MIN_RELEVANCE_SCORE and ho > 0
         ]
 
         if not scored:

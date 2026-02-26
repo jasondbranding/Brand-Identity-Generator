@@ -704,6 +704,7 @@ def generate_directions(
     refinement_feedback: Optional[str] = None,
     research_context: str = "",
     style_ref_paths: Optional[List[Path]] = None,
+    **_kwargs,                       # absorb stale kwargs from old .pyc cache
 ) -> BrandDirectionsOutput:
     """
     Call Gemini to analyze the brief and generate brand identity directions.
