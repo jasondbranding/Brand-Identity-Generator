@@ -2434,6 +2434,15 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
 
         scored.sort(key=lambda x: -x[0])
 
+        # Filter out low-relevance refs — only return if meaningful match exists
+        # Minimum score threshold: folder_boost(3) + cat_score(2) = 5 means at least
+        # 1 keyword matched category + 1 matched KEYWORD_PATTERN_MAP
+        MIN_RELEVANCE_SCORE = 3.0
+        scored = [(s, cat, p) for s, cat, p in scored if s >= MIN_RELEVANCE_SCORE]
+
+        if not scored:
+            return []
+
         result: list = []
         seen_cats: set = set()
         for score, cat, p in scored:
