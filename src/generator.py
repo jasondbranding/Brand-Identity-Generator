@@ -96,10 +96,15 @@ def generate_all_assets(
     output_dir.mkdir(parents=True, exist_ok=True)
     results = {}
 
+    # ── Batch tag extraction: 1 Gemini call for all directions ────────────
+    # Pre-resolve tags before parallel generation so each thread doesn't
+    # make its own Gemini call. Saves ~8-10s (was 4 calls → now 1 call).
+    console.print("\n[bold cyan]→ Extracting tags for all directions (batch)...[/bold cyan]")
+    pre_resolved_tags = _resolve_all_direction_tags(
+        brief_text, directions, brief_keywords
+    )
+
     # ── Parallel generation: all 4 directions run concurrently ────────────
-    # Each direction's logo + pattern + palette are independent, so we run
-    # all 4 _generate_direction_assets() calls in parallel via ThreadPoolExecutor.
-    # This reduces total time from ~5min (serial) to ~1-1.5min.
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import time as _time
 
@@ -122,6 +127,7 @@ def generate_all_assets(
             moodboard_images=moodboard_images,
             style_ref_images=style_ref_images,
             logo_only=logo_only,
+            pre_resolved_tags=pre_resolved_tags.get(direction.option_number),
         )
         elapsed = _time.monotonic() - t0
         console.print(
@@ -228,6 +234,93 @@ Example output: ["saas", "tech", "startup", "minimal", "geometric", "confident",
         console.print(f"  [dim]tag extraction failed ({type(e).__name__}) — using brief keywords[/dim]")
 
     return list(user_keywords or [])
+
+
+def _resolve_all_direction_tags(
+    brief_text: str,
+    directions: list,
+    user_keywords: Optional[list] = None,
+) -> dict:
+    """
+    Batch-extract taxonomy-aligned tags for ALL directions in 1 Gemini call.
+
+    Returns dict mapping option_number → list of tag strings.
+    Falls back to user_keywords for any direction that fails.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    fallback = list(user_keywords or [])
+    if not api_key or not directions:
+        return {d.option_number: fallback for d in directions}
+
+    # Build context for all directions at once
+    direction_blocks = []
+    for d in directions:
+        block = (
+            f"Direction {d.option_number}: {d.direction_name}\n"
+            f"  Rationale: {getattr(d, 'rationale', '')[:200]}\n"
+            f"  Graphic style: {getattr(d, 'graphic_style', '')[:150]}\n"
+            f"  Typography: {getattr(d, 'typography_primary', '')}\n"
+            f"  Colors: {', '.join(c.hex + ' (' + c.role + ')' for c in d.colors[:3])}"
+        )
+        direction_blocks.append(block)
+
+    prompt = f"""Brand brief (excerpt):
+{brief_text.strip()[:800]}
+
+{chr(10).join(direction_blocks)}
+
+For EACH of the {len(directions)} directions above, extract tags that describe its visual identity.
+
+Return a JSON object where keys are direction numbers (as strings) and values are arrays of 6-12 lowercase tag strings.
+
+Taxonomies to draw from:
+- Industries: tech, saas, fintech, crypto, web3, healthcare, ecommerce, education, real-estate, food, beverage, fashion, automotive, media, consulting, startup, enterprise, creative, nonprofit, gaming
+- Visual styles: geometric, organic, monoline, filled, minimal, detailed, flat, gradient, sharp, rounded, retro, modern, classic, brutalist, elegant, playful
+- Moods: confident, calm, bold, playful, serious, premium, accessible, warm, cold, edgy, trustworthy, innovative, elegant, powerful, friendly, mysterious, dynamic, futuristic
+- Techniques: negative space, grid construction, symmetry, asymmetry, modularity
+
+Example output:
+{{"1": ["tech", "minimal", "geometric", "confident"], "2": ["startup", "bold", "organic", "playful"]}}
+
+Return ONLY valid JSON. No explanation."""
+
+    try:
+        import json as _json
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=512,
+            ),
+        )
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        parsed = _json.loads(raw)
+        result = {}
+        for d in directions:
+            key = str(d.option_number)
+            tags_raw = parsed.get(key, [])
+            if isinstance(tags_raw, list) and tags_raw:
+                tags = [str(t).lower().strip() for t in tags_raw if t]
+                merged = list(dict.fromkeys(tags + fallback))
+                result[d.option_number] = merged
+            else:
+                result[d.option_number] = fallback
+
+        tag_count = sum(len(v) for v in result.values())
+        console.print(f"  [dim]batch tags: {tag_count} tags for {len(result)} directions (1 call)[/dim]")
+        return result
+
+    except Exception as e:
+        console.print(f"  [dim]batch tag extraction failed ({type(e).__name__}) — using brief keywords[/dim]")
+        return {d.option_number: fallback for d in directions}
 
 
 # ── Style DNA extraction (Fix #1 — Vision pre-extract) ────────────────────────
@@ -627,13 +720,18 @@ def _generate_direction_assets(
     moodboard_images: Optional[list] = None,
     style_ref_images: Optional[list] = None,
     logo_only: bool = False,
+    pre_resolved_tags: Optional[list] = None,
 ) -> DirectionAssets:
     slug = _slugify(direction.direction_name)
     asset_dir = output_dir / f"option_{direction.option_number}_{slug}"
     asset_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Resolve effective tags once for this direction ─────────────────────
-    effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
+    # ── Use pre-resolved tags (batch) or fallback to per-direction call ────
+    effective_keywords = (
+        pre_resolved_tags
+        if pre_resolved_tags
+        else _resolve_direction_tags(brief_text, direction, brief_keywords)
+    )
 
     # ── Extract style DNA from user's ref images (cached) ─────────────────
     style_dna: Optional[dict] = None
