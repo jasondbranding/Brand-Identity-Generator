@@ -3203,6 +3203,11 @@ def _cleanup(brief_dir: Path) -> None:
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     import traceback as _tb
+    # Silently ignore "Message is not modified" — harmless double-tap artefact
+    err_str = str(context.error) if context.error else ""
+    if "message is not modified" in err_str.lower():
+        logger.debug(f"Suppressed benign Telegram error: {err_str[:80]}")
+        return
     logger.error("Exception while handling update:", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
         # Include exception type/message so it's visible without server log access
