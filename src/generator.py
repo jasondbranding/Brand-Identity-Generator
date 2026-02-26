@@ -1053,47 +1053,33 @@ def generate_palette_only(
             for c in direction.colors
         ]
 
-        # If refinement feedback is given, use Gemini to adjust colors
+        # Resolve keywords
         fetch_keywords = list(effective_keywords or [])
-        gemini_adjusted = None
-        if refinement_feedback:
-            fetch_keywords.extend(refinement_feedback.lower().split())
-            # Use Gemini to interpret feedback and generate adjusted color palette
-            try:
-                import json as _json
-                adjusted = _adjust_colors_with_gemini(
-                    direction_color_dicts, refinement_feedback
-                )
-                if adjusted:
-                    direction_color_dicts = adjusted
-                    gemini_adjusted = adjusted
-                    console.print(
-                        f"  [green]✓[/green] Palette adjusted by Gemini: "
-                        f"{', '.join(c.get('hex','') for c in adjusted)}"
-                    )
-            except Exception as adj_err:
-                console.print(f"  [yellow]⚠ Gemini color adjust: {adj_err}[/yellow]")
 
-        # If Gemini already adjusted the colors, use them directly as enriched_colors
-        # (skip fetch_palette_for_direction which may override Gemini's adjustments)
-        if gemini_adjusted:
-            # Ensure each color has required fields
-            enriched_colors = []
-            for i, c in enumerate(gemini_adjusted):
-                enriched_colors.append({
-                    "hex": c.get("hex", "#000000"),
-                    "name": c.get("name", f"Color {i+1}"),
-                    "role": c.get("role", "accent"),
-                    "source": "gemini_adjusted",
-                })
-        else:
-            # Pass refinement_feedback so fetch_palette_for_direction uses the
-            # feedback-first prompt (PALETTE_FEEDBACK_PROMPT) instead of relying
-            # on the original direction colors — this prevents the "same palette" bug
+        # ── Color generation strategy ────────────────────────────────────────
+        # When refinement_feedback is given, bypass _adjust_colors_with_gemini
+        # entirely and go straight to fetch_palette_for_direction with the
+        # PALETTE_FEEDBACK_PROMPT.  _adjust_colors_with_gemini produces
+        # "small adjustments" — if the existing palette has no color matching
+        # the requested change (e.g., "add blue" when palette is all orange),
+        # Gemini leaves everything unchanged and returns nearly identical colors,
+        # causing the "same palette" bug.
+        # fetch_palette_for_direction + PALETTE_FEEDBACK_PROMPT generates a
+        # FRESH 6-color palette that explicitly follows the user's instruction.
+        if refinement_feedback:
+            console.print(
+                f"  [dim]Palette refinement mode — generating fresh palette "
+                f"from feedback: \"{refinement_feedback[:60]}\"[/dim]"
+            )
             enriched_colors = fetch_palette_for_direction(
                 keywords=fetch_keywords,
                 direction_colors=direction_color_dicts,
-                refinement_feedback=refinement_feedback or None,
+                refinement_feedback=refinement_feedback,
+            )
+        else:
+            enriched_colors = fetch_palette_for_direction(
+                keywords=fetch_keywords,
+                direction_colors=direction_color_dicts,
             )
 
         if enriched_colors:
