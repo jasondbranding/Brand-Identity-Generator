@@ -536,9 +536,28 @@ def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] =
     color_line = f"[COLOR]: {fill_desc}, {color_name} {color_hex}, monochrome single-color only"
 
     # [TYPOGRAPHY]: only for logotype/combination
+    # Strip font names — image gen models don't have font libraries
     typo_line = ""
     if is_text_type and typo_treatment and typo_treatment.lower() not in ("", "n/a"):
-        typo_line = f"[TYPOGRAPHY]: {typo_treatment}"
+        import re as _re_typo
+        # Remove "similar to FontName", "inspired by FontName", "FontName-like"
+        cleaned_typo = _re_typo.sub(
+            r'(?:similar to|inspired by|based on|reminiscent of|in the style of)\s+[A-Z][a-zA-Z\s]+(?:,|\.|\b)',
+            '', typo_treatment
+        )
+        # Remove standalone font names (capitalized multi-word like "Playfair Display", "Open Sans")
+        _KNOWN_FONTS = (
+            "Futura", "Helvetica", "Arial", "Playfair Display", "Playfair",
+            "Merriweather", "Lora", "Open Sans", "Roboto", "Canela",
+            "Graphik", "Neue Haas Grotesk", "IBM Plex", "Garamond",
+            "Didot", "Bodoni", "Gotham", "Proxima Nova", "Montserrat",
+            "Inter", "DM Sans", "Work Sans", "Poppins", "Raleway",
+        )
+        for font in _KNOWN_FONTS:
+            cleaned_typo = cleaned_typo.replace(font, "")
+        cleaned_typo = _re_typo.sub(r',\s*,', ',', cleaned_typo).strip().strip(',').strip()
+        if cleaned_typo:
+            typo_line = f"[TYPOGRAPHY]: {cleaned_typo}"
 
     # [RENDER]: output quality + composition
     render_line = f"[RENDER]: {render_style}, {composition}"
@@ -595,7 +614,18 @@ def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] =
         lines.append(metaphor_line)
     lines.append(forbidden_line)
 
-    return "\n".join(line for line in lines if line)
+    # ── Post-process: strip pixel dimensions and canvas sizes (noise for image gen) ──
+    import re as _re
+    raw = "\n".join(line for line in lines if line)
+    # Remove "NNpx" dimensions, "NNxNNpx canvas", "800×800px" etc.
+    raw = _re.sub(r'\b\d+(?:×|x)\d+\s*px\b', '', raw)
+    raw = _re.sub(r'\b\d+px\b', '', raw)
+    raw = _re.sub(r'\b\d+pt\b', '', raw)
+    # Clean up leftover artifacts: double commas, trailing commas before periods
+    raw = _re.sub(r',\s*,', ',', raw)
+    raw = _re.sub(r',\s*\.', '.', raw)
+    raw = _re.sub(r'\s{2,}', ' ', raw)
+    return raw.strip()
 
 
 def _pattern_spec_to_prompt(spec) -> str:

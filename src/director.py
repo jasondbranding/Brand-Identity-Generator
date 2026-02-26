@@ -57,20 +57,22 @@ class LogoSpec(BaseModel):
     )
     form: str = Field(
         description=(
-            "Exact visual description of the mark. Be precise with geometry, dimensions, weight:\n"
-            "  For symbol/abstract_mark: shape primitives, px dimensions, angles, stroke weights.\n"
-            "    GOOD: 'two concentric arcs, outer 48px radius 5px stroke, inner 28px radius 3px stroke, open at 7 o'clock'\n"
+            "Exact visual description of the mark. Be precise with SHAPE, PROPORTION, ANGLES — "
+            "but DO NOT use pixel dimensions (px, pt). Image gen models ignore px values.\n"
+            "  For symbol/abstract_mark: shape primitives, proportions, angles, relative stroke weight.\n"
+            "    GOOD: 'two concentric arcs, outer ring thick stroke, inner ring thin stroke, both open at 7 o'clock, overall square proportion'\n"
             "    BAD:  'a circular mark suggesting infinity'\n"
+            "    BAD:  'two arcs, outer 48px radius 5px stroke' (px meaningless to image gen)\n"
             "  For lettermark: exact letter, weight, stylisation treatment.\n"
-            "    GOOD: 'uppercase M, custom serif, 72pt, vertically mirrored at the baseline creating a reflection'\n"
-            "  For logotype: typeface style, weight, any custom letterform treatment.\n"
-            "    GOOD: 'brand name in condensed geometric sans-serif, all-caps, extra-bold, 5% tracked, baseline perfectly aligned'\n"
+            "    GOOD: 'uppercase M, heavy-weight custom serif, vertically mirrored at the baseline creating a reflection'\n"
+            "  For logotype: typeface visual character, weight, any custom letterform treatment.\n"
+            "    GOOD: 'brand name in condensed geometric sans-serif, all-caps, extra-bold, wide tracking'\n"
             "  For combination: describe symbol AND its spatial relationship to the type.\n"
-            "    GOOD: 'small leaf symbol 24px to the left of the brand name, vertically centered, 8px gap between mark and type'"
+            "    GOOD: 'small rounded leaf symbol to the left of the brand name, vertically centered, narrow gap'"
         )
     )
     composition: str = Field(
-        description="Canvas rules. E.g. 'centered, 20% padding all sides, 800×800px canvas, pure white #FFFFFF background'. For combination/logotype: specify horizontal or stacked layout."
+        description="Layout rules: alignment, padding, background color. E.g. 'centered, generous padding, pure white #FFFFFF background'. For combination/logotype: specify horizontal or stacked layout. Do NOT include canvas px size (e.g. 800x800) — image gen uses fixed resolution."
     )
     color_hex: str = Field(
         description=(
@@ -94,9 +96,13 @@ class LogoSpec(BaseModel):
     )
     typography_treatment: str = Field(
         description=(
-            "REQUIRED for logotype and combination. Describe the typeface and any custom treatment:\n"
-            "  GOOD: 'condensed geometric sans-serif similar to Futura, all-caps, extra-bold weight, "
-            "5% letter-spacing, custom ink-trap detail on the corners'\n"
+            "REQUIRED for logotype and combination. Describe VISUAL characteristics only.\n"
+            "⚠ DO NOT use real font names (Futura, Helvetica, Playfair, etc.) — image gen models\n"
+            "  do NOT have font libraries. Instead describe the VISUAL properties:\n"
+            "  GOOD: 'condensed geometric sans-serif, all-caps, extra-bold weight, wide letter-spacing, "
+            "sharp ink-trap corners, high x-height'\n"
+            "  GOOD: 'high-contrast serif, elegant thin-to-thick stroke transition, moderate tracking'\n"
+            "  BAD:  'Playfair Display, bold, 4% letter-spacing' (model doesn't know Playfair)\n"
             "  For symbol/abstract_mark/lettermark: set to 'N/A'."
         )
     )
@@ -105,10 +111,12 @@ class LogoSpec(BaseModel):
     )
     metaphor: str = Field(
         description=(
-            "For symbol/abstract_mark/combination: what the mark visually suggests or evokes. "
-            "E.g. 'coffee bean cross-section revealing a mountain ridge — dual reading of origin and harvest'. "
-            "For logotype: describe the typographic personality. "
-            "Use 'abstract' if purely geometric with no representational intent."
+            "ONE short sentence describing what SHAPE the viewer sees — not philosophy.\n"
+            "  GOOD: 'two interlocking arcs suggest a coffee bean split open to reveal a mountain ridge'\n"
+            "  GOOD: 'the negative space between the W strokes forms a whale tail'\n"
+            "  BAD:  'evokes the deep, silent pause, a moment of profound transformation' (too abstract, not visual)\n"
+            "For logotype: describe the typographic personality in visual terms.\n"
+            "Use 'abstract geometric, no representational intent' if purely non-figurative."
         )
     )
     avoid: List[str] = Field(
@@ -311,6 +319,26 @@ If the user brief includes CREATIVE CONSTRAINTS (anti-cliché list + lateral ter
 those are HARD RULES. Violating them = rejected output. Use the lateral territory list as
 your creative starting point, then push one level deeper.
 
+## MANDATORY RENDERING DIVERSITY — 4 DIRECTIONS MUST LOOK DIFFERENT
+
+Each of the 4 directions MUST use a DIFFERENT render_style in logo_spec.
+The purpose of 4 directions is to show the client 4 DISTINCT visual approaches.
+If all 4 share the same rendering, you have failed.
+
+RENDER STYLE POOL — pick ONE per direction (no repeats):
+  - "clean flat vector" — crisp digital edges, zero texture
+  - "precise geometric construction" — ruler-and-compass, mathematical precision
+  - "organic hand-drawn ink" — visible imperfections, human hand quality
+  - "linocut / woodcut" — carved, bold silhouette, slightly rough edges
+  - "brush calligraphy" — fluid, gestural, Asian-influenced
+  - "engraved / etched" — fine parallel hatching, copper-plate feel
+  - "stencil cut" — rough edges, spray-paint-ready negative space
+  - "editorial typographic" — type-only, modernist, grid-based
+
+⚠ If the user provided a style reference image, ONE direction may match that ref's style.
+  The other 3 directions MUST still use different rendering approaches.
+  Do NOT apply the ref style to all 4.
+
 ## MANDATORY LOGO TYPE ALLOCATION — 4 DIRECTIONS
 
 You MUST follow these rules when choosing logo_type for each of the 4 directions:
@@ -376,16 +404,18 @@ LOGO TYPE SELECTION — choose based on what fits the brand strategy:
     ⚠ avoid list must NOT include "text" — DO include "gradient", "drop shadow"
 
 typography_treatment field:
-  REQUIRED for logotype and combination. Describe typeface character + any custom treatment.
-  GOOD: "condensed geometric sans-serif, all-caps extra-bold, 6% letter-spacing, brand name only"
+  REQUIRED for logotype and combination. Describe VISUAL characteristics — no font names.
+  GOOD: "condensed geometric sans-serif, all-caps extra-bold, wide letter-spacing, brand name only"
+  BAD: "Playfair Display, bold" (image gen models don't have font libraries)
   BAD: "a nice clean font"
   Set to "N/A" for symbol/abstract_mark/lettermark.
 
 Good logo_spec form examples by type:
-  symbol:      "two concentric arcs, outer 48px radius 5px stroke, inner 28px radius 3px stroke, open at 7 o'clock position"
-  logotype:    "brand name in condensed neo-grotesque sans-serif, all-caps, bold 700 weight, perfectly even baseline"
-  combination: "24px rounded-square icon to the left, 8px gap, brand name in medium-weight humanist sans-serif beside it"
+  symbol:      "two concentric arcs, outer ring thick stroke, inner ring thin stroke, both open at 7 o'clock, square proportion"
+  logotype:    "brand name in condensed neo-grotesque sans-serif, all-caps, extra-bold, perfectly even baseline"
+  combination: "small rounded-square icon to the left, narrow gap, brand name in medium-weight humanist sans-serif beside it"
   BAD:         "a circular mark evoking the brand values"
+  BAD:         "two arcs, outer 48px radius 5px stroke" (px dimensions are meaningless to image gen)
 
 pattern_spec: Repeating seamless surface tile.
 - motif: name the element type precisely
@@ -420,15 +450,17 @@ Vague values → generic output. Specific values → high-quality brand assets.
 
 ### LOGO SPEC — Field-by-field guidance:
 
-form (MOST IMPORTANT field):
-  ✓ GOOD: "two concentric arcs, outer radius 48px with 5px stroke, inner radius 28px with 3px stroke, both open at the 7 o'clock position, creating a C-like form suggesting a coffee bean cross-section"
-  ✓ GOOD: "equilateral triangle 72px per side, 8px rounded corners, vertex pointing upward, 15° clockwise tilt"
+form (MOST IMPORTANT field — describe SHAPE and PROPORTION, not px dimensions):
+  ✓ GOOD: "two concentric arcs, outer ring with thick stroke, inner ring with thin stroke, both open at 7 o'clock, creating a C-like form suggesting a coffee bean cross-section"
+  ✓ GOOD: "equilateral triangle with softly rounded corners, vertex pointing upward, slight 15° clockwise tilt"
   ✗ BAD:  "a circular mark representing the brand"
   ✗ BAD:  "an organic leaf shape"
+  ✗ BAD:  "outer 48px radius 5px stroke" (px values are ignored by image gen)
 
-metaphor:
-  ✓ GOOD: "suggests a coffee bean split to reveal a mountain terrain — dual reading of origin and harvest"
-  ✗ BAD:  "represents quality and craftsmanship"
+metaphor (describe what SHAPE the viewer sees, not philosophy):
+  ✓ GOOD: "the two arcs suggest a coffee bean split to reveal a mountain ridge — dual reading of origin and harvest"
+  ✗ BAD:  "represents quality and craftsmanship" (too abstract)
+  ✗ BAD:  "evokes the profound transformation of nature" (image gen can't render philosophy)
 
 ⚠ MONOCHROME — color_hex is a SINGLE hex. The logo is black/one-color on white. Never two colors.
 ⚠ NO TEXT — logo_type is 'symbol', 'abstract_mark', or 'lettermark'. Never a wordmark.
