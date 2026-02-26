@@ -1632,6 +1632,85 @@ def _generate_image(
     return save_path
 
 
+def edit_logo_image(
+    existing_logo_path: Path,
+    edit_instruction: str,
+    save_path: Path,
+    api_key: str,
+) -> Optional[Path]:
+    """
+    Edit an existing logo image with a text instruction using Gemini multimodal.
+
+    Sends the existing logo + edit instructions to Gemini image generation.
+    The model sees the current design and applies ONLY the requested change,
+    preserving all existing design elements (shape, color, style, composition).
+
+    Returns save_path on success, None on failure.
+    """
+    if not api_key:
+        return None
+
+    client = genai.Client(api_key=api_key)
+
+    # Build the edit prompt — very explicit about PRESERVE vs CHANGE
+    edit_prompt = (
+        "You are editing an existing logo. The CURRENT logo image is attached below.\n\n"
+        f"EDIT INSTRUCTION (apply this change ONLY): {edit_instruction}\n\n"
+        "STRICT RULES:\n"
+        "- PRESERVE the overall composition, color palette, rendering style, and all existing visual elements\n"
+        "- ONLY add or modify what the EDIT INSTRUCTION specifies — nothing else\n"
+        "- Keep the EXACT same white background\n"
+        "- Keep the EXACT same single color used in the original logo\n"
+        "- Keep the EXACT same illustration style (stroke weight, fill technique, level of detail)\n"
+        "- If the instruction asks to ADD an element, integrate it naturally into the existing design\n"
+        "- Do NOT redesign the logo from scratch — this is a targeted edit\n"
+        "- Square format, white background, production-ready logo quality\n"
+        "- No text, no words, no letters (unless brand name was already in the original)"
+    )
+
+    img_bytes = existing_logo_path.read_bytes()
+    ext  = existing_logo_path.suffix.lower().lstrip(".")
+    mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
+
+    parts = [
+        types.Part.from_text(text=edit_prompt),
+        types.Part.from_bytes(data=img_bytes, mime_type=mime),
+    ]
+
+    # Try Gemini image generation models (same ladder as _generate_image)
+    _edit_models = [
+        "gemini-2.5-flash-image",
+        "gemini-2.0-flash-exp-image-generation",
+    ]
+    for model in _edit_models:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=parts,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            for candidate in response.candidates or []:
+                for part in candidate.content.parts or []:
+                    if hasattr(part, "inline_data") and part.inline_data:
+                        data = part.inline_data.data
+                        if isinstance(data, str):
+                            data = base64.b64decode(data)
+                        save_path.write_bytes(data)
+                        short = model.replace("gemini-", "").replace("-image-generation", "").replace("-image", "")
+                        console.print(f"  [green]✓ logo edit[/green] ({short}) → {save_path.name}")
+                        return save_path
+        except Exception as _e:
+            if any(k in str(_e).lower() for k in ("not found", "permission", "not supported", "invalid")):
+                continue
+            console.print(f"  [yellow]⚠ logo edit failed ({_e})[/yellow]")
+            break
+
+    console.print("  [yellow]⚠ edit_logo_image: no image returned from any model[/yellow]")
+    return None
+
+
 def _get_reference_images(brief_keywords: list, ref_type: str = "logos", top_n: int = 15) -> list:
     """
     Find reference images that match brand keywords — with guaranteed cross-category diversity.

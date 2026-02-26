@@ -458,6 +458,61 @@ class PipelineRunner:
                 elapsed_seconds=time.time() - start,
             )
 
+    # ── Phase: single logo edit (targeted HITL refinement) ───────────────────
+
+    async def run_single_logo_edit(
+        self,
+        direction_num: int,
+        logo_path: Path,
+        edit_instruction: str,
+        output_dir: Path,
+    ) -> dict:
+        """
+        Edit one existing logo image using Gemini multimodal image editing.
+        Used when user references a specific direction number in their feedback.
+        Returns dict with success, path, direction_num, elapsed.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._run_single_logo_edit_sync,
+            direction_num, logo_path, edit_instruction, output_dir,
+        )
+
+    def _run_single_logo_edit_sync(
+        self,
+        direction_num: int,
+        logo_path: Path,
+        edit_instruction: str,
+        output_dir: Path,
+    ) -> dict:
+        import time as _time
+        start = _time.time()
+        try:
+            from src.generator import edit_logo_image
+            save_path = output_dir / f"option_{direction_num}_edited_logo.png"
+            result_path = edit_logo_image(
+                existing_logo_path=logo_path,
+                edit_instruction=edit_instruction,
+                save_path=save_path,
+                api_key=self.api_key,
+            )
+            return {
+                "success": result_path is not None,
+                "path": result_path,
+                "direction_num": direction_num,
+                "elapsed": _time.time() - start,
+            }
+        except Exception as e:
+            import traceback
+            return {
+                "success": False,
+                "path": None,
+                "direction_num": direction_num,
+                "elapsed": _time.time() - start,
+                "error": f"{e}\n{traceback.format_exc()}",
+            }
+
     # ── Phase: logo variants + SVG ───────────────────────────────────────────
 
     async def run_logo_variants_phase(

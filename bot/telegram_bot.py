@@ -612,7 +612,7 @@ def reset_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
         
     # Clear all HITL state flags to prevent state leakage into new sessions
     for k in [
-        LOGO_REVIEW_FLAG, "logo_refine_mode",
+        LOGO_REVIEW_FLAG, "logo_refine_mode", "logo_force_regenerate",
         PALETTE_REVIEW_FLAG, "palette_refine_mode",
         PATTERN_REF_FLAG, PATTERN_DESC_FLAG,
         PATTERN_REVIEW_FLAG, "pattern_refine_mode",
@@ -643,6 +643,38 @@ def escape_md(text: str) -> str:
     """Escape special chars for Telegram MarkdownV2."""
     special = r"\_*[]()~`>#+-=|{}.!"
     return "".join(f"\\{c}" if c in special else c for c in text)
+
+
+def _extract_direction_number(text: str) -> Optional[int]:
+    """
+    Detect if user feedback references a specific direction number (1-4).
+    Supports: "hướng 1", "hướng một", "direction 2", "số 3",
+              digit at start of sentence "1, thêm...", "4 nhưng..."
+    Returns int 1-4 or None.
+    """
+    import re as _re2
+    t = text.lower().strip()
+    viet_words = {"một": 1, "hai": 2, "ba": 3, "bốn": 4}
+    patterns = [
+        r'hướng\s*([1-4])\b',
+        r'hướng\s*(một|hai|ba|bốn)\b',
+        r'direction\s*([1-4])\b',
+        r'số\s*([1-4])\b',
+        r'^([1-4])[,\.\s]',       # "1, thêm..." at start
+    ]
+    for pat in patterns:
+        m = _re2.search(pat, t)
+        if m:
+            val = m.group(1)
+            if val in viet_words:
+                return viet_words[val]
+            try:
+                n = int(val)
+                if 1 <= n <= 4:
+                    return n
+            except ValueError:
+                pass
+    return None
 
 
 # ── Image helpers ─────────────────────────────────────────────────────────────
@@ -1873,6 +1905,19 @@ async def step_logo_review_callback(update: Update, context: ContextTypes.DEFAUL
         # Keep LOGO_REVIEW_FLAG so the text handler picks up the next message
         context.user_data[LOGO_REVIEW_FLAG] = True
         context.user_data["logo_refine_mode"] = True
+        context.user_data.pop("logo_force_regenerate", None)
+        return
+
+    if data == "logo_refine_all":
+        await query.edit_message_text(
+            "🔄 *Tạo lại 4 hướng hoàn toàn mới\\.*\n\n"
+            "Mô tả điều bạn muốn thay đổi \\(hoặc gõ _tạo lại_ để gen ngẫu nhiên\\)\\:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Set force-regenerate flag so step_logo_review_text skips direction detection
+        context.user_data[LOGO_REVIEW_FLAG] = True
+        context.user_data["logo_refine_mode"] = True
+        context.user_data["logo_force_regenerate"] = True
         return
 
     # logo_select_N
@@ -1969,7 +2014,8 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data[LOGO_REVIEW_FLAG] = False
         return
 
-    # Clear refine mode flag
+    # Read and clear refine/force-regenerate flags
+    force_regenerate = context.user_data.pop("logo_force_regenerate", False)
     context.user_data.pop("logo_refine_mode", None)
     context.user_data[LOGO_REVIEW_FLAG] = False
 
@@ -1998,23 +2044,149 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
             logger.warning(f"Could not build enriched feedback: {e}")
             enriched_feedback = text
 
-    progress_msg = await update.message.reply_text(
-        f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
-        f"_\"{escape_md(text[:100])}\"_",
-        parse_mode=ParseMode.MARKDOWN_V2,
+    # ── Route: single-direction edit vs full regenerate ───────────────────────
+    # If user clicked "Tạo lại 4 hướng" button, skip direction detection entirely
+    direction_num = None if force_regenerate else _extract_direction_number(text)
+    all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
+    logo_path_for_edit: Optional[Path] = None
+
+    if direction_num:
+        direction_assets = all_assets.get(direction_num)
+        raw_logo = getattr(direction_assets, "logo", None) if direction_assets else None
+        if raw_logo and Path(raw_logo).exists():
+            logo_path_for_edit = Path(raw_logo)
+            logger.info(f"Targeted edit mode: direction {direction_num}, logo={logo_path_for_edit.name}")
+        else:
+            logger.warning(f"Direction {direction_num} referenced but logo path not found — falling back to full regenerate")
+
+    if logo_path_for_edit:
+        # ── TARGETED EDIT: keep design, apply only the requested change ──────
+        progress_msg = await update.message.reply_text(
+            f"✏️ *Đang chỉnh sửa hướng {direction_num}\\.\\.\\.*\n\n"
+            f"_\"{escape_md(text[:100])}\"_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        asyncio.create_task(
+            _run_single_logo_edit_phase(
+                context=context,
+                chat_id=chat_id,
+                progress_msg_id=progress_msg.message_id,
+                direction_num=direction_num,
+                logo_path=logo_path_for_edit,
+                feedback_text=text,
+                api_key=api_key,
+            )
+        )
+    else:
+        # ── FULL REGENERATE: no specific direction → gen 4 new directions ────
+        progress_msg = await update.message.reply_text(
+            f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
+            f"_\"{escape_md(text[:100])}\"_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        asyncio.create_task(
+            _run_pipeline_phase1(
+                context=context,
+                chat_id=chat_id,
+                progress_msg_id=progress_msg.message_id,
+                brief=brief,
+                brief_dir=brief_dir,
+                api_key=api_key,
+                refinement_feedback=enriched_feedback,
+            )
+        )
+
+
+# ── Sub-phase: targeted single-logo edit ──────────────────────────────────────
+
+async def _run_single_logo_edit_phase(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    progress_msg_id: int,
+    direction_num: int,
+    logo_path: Path,
+    feedback_text: str,
+    api_key: str,
+) -> None:
+    """
+    Edit ONE existing logo image using Gemini multimodal (image + text → edited image).
+    Triggered when user's feedback explicitly references a direction number.
+    Preserves the design of that direction, only applies the requested change.
+    """
+    output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
+
+    await safe_edit(
+        context, chat_id, progress_msg_id,
+        f"✏️ *Đang chỉnh sửa hướng {direction_num}\\.\\.\\.*\n\n"
+        f"_\"{escape_md(feedback_text[:80])}\"_",
     )
 
-    asyncio.create_task(
-        _run_pipeline_phase1(
-            context=context,
-            chat_id=chat_id,
-            progress_msg_id=progress_msg.message_id,
-            brief=brief,
-            brief_dir=brief_dir,
-            api_key=api_key,
-            refinement_feedback=enriched_feedback,
-        )
+    runner = PipelineRunner(api_key=api_key)
+    result = await runner.run_single_logo_edit(
+        direction_num=direction_num,
+        logo_path=logo_path,
+        edit_instruction=feedback_text,
+        output_dir=output_dir,
     )
+
+    if not result["success"]:
+        err = escape_md(result.get("error", "unknown error")[:300])
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Không thể chỉnh sửa logo\\.\n```\n{err}\n```",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        # Re-enable logo review so user can try again
+        context.user_data[LOGO_REVIEW_FLAG] = True
+        return
+
+    edited_path = result["path"]
+    elapsed = result.get("elapsed", 0)
+    secs = int(elapsed)
+
+    await safe_edit(
+        context, chat_id, progress_msg_id,
+        f"✅ *Hướng {direction_num} đã được chỉnh sửa\\!* {secs}s",
+    )
+
+    # Update the logo path in ALL_ASSETS_KEY so logo_select uses the edited version
+    all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
+    direction_assets = all_assets.get(direction_num)
+    if direction_assets:
+        direction_assets.logo = edited_path
+        context.user_data[ALL_ASSETS_KEY] = all_assets
+
+    # Send edited logo
+    try:
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=edited_path.read_bytes(),
+            caption=f"✏️ Hướng {direction_num} — đã chỉnh sửa",
+        )
+    except Exception:
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=edited_path.read_bytes(),
+            filename=edited_path.name,
+        )
+
+    # Show action keyboard: select this direction / refine more / regenerate all
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"✅ Chọn hướng {direction_num} này",
+            callback_data=f"logo_select_{direction_num}",
+        )],
+        [InlineKeyboardButton("✏️ Chỉnh sửa tiếp hướng này", callback_data="logo_refine")],
+        [InlineKeyboardButton("🔄 Tạo lại 4 hướng hoàn toàn mới", callback_data="logo_refine_all")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="👆 *Bạn muốn làm gì tiếp theo?*",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
+    )
+    # Keep LOGO_REVIEW_FLAG active so user can keep refining
+    context.user_data[LOGO_REVIEW_FLAG] = True
 
 
 # ── Sub-phase: logo variants + palette generation ─────────────────────────────
