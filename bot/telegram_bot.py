@@ -1936,6 +1936,13 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
     api_key = os.environ.get("GEMINI_API_KEY", "")
     brief = get_brief(context)
 
+    # ── Recover brief_dir if missing or deleted ────────────────────────────
+    if not brief_dir or not brief_dir.exists():
+        if brief and brief.brand_name:
+            brief_dir = brief.write_to_temp_dir()
+            context.user_data[TEMP_DIR_KEY] = str(brief_dir)
+            logger.info(f"Recovered brief_dir for logo refinement → {brief_dir}")
+
     if not brief_dir or not brief_dir.exists():
         await update.message.reply_text(
             "❌ Session đã hết hạn\\. Gõ /start để bắt đầu lại\\.",
@@ -2290,6 +2297,15 @@ async def _run_palette_only_phase(
     output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
     brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
     brief_dir = Path(brief_dir_str) if brief_dir_str else None
+
+    # ── Recover brief_dir if missing or deleted (e.g. bot restart) ─────────
+    if not brief_dir or not brief_dir.exists():
+        brief = get_brief(context)
+        if brief and brief.brand_name:
+            brief_dir = brief.write_to_temp_dir()
+            context.user_data[TEMP_DIR_KEY] = str(brief_dir)
+            logger.info(f"Recovered brief_dir → {brief_dir}")
+
     api_key = os.environ.get("GEMINI_API_KEY", "")
 
     progress_msg = await context.bot.send_message(
@@ -2525,6 +2541,13 @@ async def _run_pattern_generation(
     brief_dir = Path(brief_dir_str) if brief_dir_str else None
     api_key = os.environ.get("GEMINI_API_KEY", "")
     brief = get_brief(context)
+
+    # ── Recover brief_dir if missing or deleted ────────────────────────────
+    if not brief_dir or not brief_dir.exists():
+        if brief and brief.brand_name:
+            brief_dir = brief.write_to_temp_dir()
+            context.user_data[TEMP_DIR_KEY] = str(brief_dir)
+            logger.info(f"Recovered brief_dir for pattern phase → {brief_dir}")
 
     pattern_refs = [Path(p) for p in context.user_data.get(PATTERN_REFS_KEY, []) if Path(p).exists()]
     description = brief.pattern_description or None
