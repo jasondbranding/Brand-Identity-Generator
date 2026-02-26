@@ -605,8 +605,21 @@ def get_brief(context: ContextTypes.DEFAULT_TYPE) -> ConversationBrief:
 
 def reset_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data[BRIEF_KEY] = ConversationBrief()
-    context.user_data.pop(TEMP_DIR_KEY, None)
-    context.user_data.pop(TONE_CUSTOM_KEY, None)
+    
+    # Core brief keys
+    for k in [TEMP_DIR_KEY, TONE_CUSTOM_KEY, MSG_ID_KEY]:
+        context.user_data.pop(k, None)
+        
+    # Clear all HITL state flags to prevent state leakage into new sessions
+    for k in [
+        LOGO_REVIEW_FLAG, "logo_refine_mode",
+        PALETTE_REVIEW_FLAG, "palette_refine_mode",
+        PATTERN_REF_FLAG, PATTERN_DESC_FLAG,
+        PATTERN_REVIEW_FLAG, "pattern_refine_mode",
+        DIRECTIONS_KEY, ALL_ASSETS_KEY, OUTPUT_DIR_KEY, CHOSEN_DIR_KEY,
+        "selected_refs", "ref_uploads", "preview_refs"
+    ]:
+        context.user_data.pop(k, None)
 
 
 async def send_typing(update: Update) -> None:
