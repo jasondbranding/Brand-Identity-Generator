@@ -7,7 +7,35 @@
         "abstract",
         "gradient"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "282b473e901da6ed8a245fa7d68ad81a.jpg": {
@@ -17,7 +45,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "28e7fcc0f5e4828b9a5d9124c0a7d66c.jpg": {
@@ -27,7 +83,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "2ade3f5df86a62830d120acc2bf28ae8.jpg": {
@@ -37,7 +121,35 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "2bd741bee0a4b665927d0222f6a96c32.jpg": {
@@ -47,7 +159,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "3c8d85516a39cc99cc580d2dbc386ce0.jpg": {
@@ -57,14 +197,70 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "3fb126b6eb699217f24303cf1875f650.jpg": {
     "relative_path": "references/patterns/pattern_abstract_gradient_mesh/3fb126b6eb699217f24303cf1875f650.jpg",
     "tags": {
       "motif": "soft organic gradients",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "4e079fc255639faa73d6bcc1072b9624.jpg": {
@@ -75,7 +271,35 @@
         "abstract",
         "gradient"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "67929e3cbffeecba99f7eff885916aba.jpg": {
@@ -85,7 +309,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "82f3c9007894c81e6f2a7c09c3fbc160.jpg": {
@@ -95,7 +347,35 @@
       "style": [
         "gradient"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "a8435ad7f3b269fe76437de5f8658eaa.jpg": {
@@ -105,7 +385,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "ab0085655e8809aae95fa92349a7acc1.jpg": {
@@ -115,7 +423,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "ad877706324d26224607ae359716604b.jpg": {
@@ -125,7 +461,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "b7533b841d3973b48b32432b2a2603dc.jpg": {
@@ -135,7 +499,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "be43de5a1a85b70703e581839df96690.jpg": {
@@ -145,7 +537,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "cca4c26a7ca5689b066b8bff5d52b024.jpg": {
@@ -153,7 +573,35 @@
     "tags": {
       "motif": "amorphous gradient blob",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "d78793a77eb3f85a0087f80e2c7d026b.jpg": {
@@ -161,7 +609,35 @@
     "tags": {
       "motif": "ribbed color gradient",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "e091f911be92e0d1b87822b9946cbfac.jpg": {
@@ -171,7 +647,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "e88f92e241afe285683b8a87ebfc28af.jpg": {
@@ -181,7 +685,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "efb77f4fa0eccef779d3d1c4e3a9fbc3.jpg": {
@@ -191,7 +723,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "f512866383717525f6ff920e082f3a9d.jpg": {
@@ -201,7 +761,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "f8584346b46a338607a81a23fd3f1ac7.jpg": {
@@ -249,7 +837,35 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "fba4e6b19d86b5b84d61403025d87d30.jpg": {
@@ -259,7 +875,35 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "calm",
+        "serene",
+        "dreamy",
+        "ethereal",
+        "soft",
+        "welcoming",
+        "futuristic",
+        "clean",
+        "modern"
+      ],
+      "industry": [
+        "tech",
+        "wellness",
+        "beauty",
+        "skincare",
+        "meditation",
+        "spa",
+        "saas",
+        "startup"
+      ],
+      "technique": [
+        "gradient",
+        "blur",
+        "mesh",
+        "overlap",
+        "translucent"
+      ]
     }
   },
   "ff890e96e78bf9e6b1107716cca7b953.jpg": {

@@ -2411,7 +2411,7 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
                 for fname, entry in index.items():
                     tags = entry.get("tags", {})
                     all_tags: set = set()
-                    for lst_key in ("motif", "style", "technique", "mood"):
+                    for lst_key in ("motif", "style", "technique", "mood", "industry"):
                         val = tags.get(lst_key, [])
                         if isinstance(val, list):
                             for t in val:
@@ -2425,7 +2425,7 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
                     absp = entry.get("local_path", "")
                     resolved = str(project_root / rel) if rel else absp
                     if resolved and _Path(resolved).exists():
-                        scored.append((score, sub.name, _Path(resolved)))
+                        scored.append((score, sub.name, _Path(resolved), tag_overlap))
             except Exception:
                 continue
 
@@ -2434,22 +2434,26 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
 
         scored.sort(key=lambda x: -x[0])
 
-        # Filter out low-relevance refs — only return if meaningful match exists
-        # Minimum score threshold: folder_boost(3) + cat_score(2) = 5 means at least
-        # 1 keyword matched category + 1 matched KEYWORD_PATTERN_MAP
-        MIN_RELEVANCE_SCORE = 3.0
-        scored = [(s, cat, p) for s, cat, p in scored if s >= MIN_RELEVANCE_SCORE]
+        # Filter out low-relevance refs — require BOTH a minimum score AND
+        # at least 1 tag-level keyword overlap.  Category / folder boost alone
+        # is no longer enough; content must actually match the brief.
+        MIN_RELEVANCE_SCORE = 5.0
+        scored = [
+            (s, cat, p, to)
+            for s, cat, p, to in scored
+            if s >= MIN_RELEVANCE_SCORE and to > 0
+        ]
 
         if not scored:
             return []
 
         result: list = []
         seen_cats: set = set()
-        for score, cat, p in scored:
+        for score, cat, p, _to in scored:
             if cat not in seen_cats and len(result) < n:
                 result.append(p)
                 seen_cats.add(cat)
-        for score, cat, p in scored:
+        for score, cat, p, _to in scored:
             if p not in result and len(result) < n:
                 result.append(p)
 

@@ -4,7 +4,40 @@
     "tags": {
       "motif": "wavy organic lines",
       "style": "",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "213920006f7051b07dd96f3ab18c7185.jpg": {
@@ -12,7 +45,40 @@
     "tags": {
       "motif": "diagonal zig-zag texture",
       "style": "",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "30948f7f939d6fbd874c8fded2fb5333.jpg": {
@@ -22,7 +88,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "3bc77afa5eb8ecd4b05c493956e76381.jpg": {
@@ -32,7 +131,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "3f7864d4d0472fbb72f346d5fbb97a7d.jpg": {
@@ -42,7 +174,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "3f84701850c8d496f88a193391f21591.jpg": {
@@ -55,7 +220,40 @@
         "abstract",
         "rounded"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "40492f9fed407b094d8fdac97aa961be.jpg": {
@@ -65,7 +263,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "5466a79d566971151da16ec52898cddc.jpg": {
@@ -75,7 +306,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "54fb298e63d79763578e1430115ef466.jpg": {
@@ -85,7 +349,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "6505ed548a4e18ef90cb20c17b6a07c9.jpg": {
@@ -95,7 +392,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "6afd8d97131cc7f2b7b7c29046135ce2.jpg": {
@@ -105,7 +435,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "75bca739067ca567e23ea381d793a800.jpg": {
@@ -115,7 +478,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "779e9aa8a4f7753c1e6f3ad48edf46d7.jpg": {
@@ -125,7 +521,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "7a8b0603192b031ebdfe1c55b66b11fc.jpg": {
@@ -135,7 +564,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "8873d688c471e63ace5ea377d38d85cf.jpg": {
@@ -145,7 +607,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "890b1ef93fad450b64edd926062e1d16.jpg": {
@@ -155,7 +650,40 @@
       "style": [
         "pixel"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "8c1dcff533ca0570b3b38fcca71ad9b4.jpg": {
@@ -166,7 +694,40 @@
         "geometric",
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "92f691bd2e98d1e96e9d624bf89af19b.jpg": {
@@ -176,7 +737,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "94d042912ad0abffffa811fd44c6d04a.jpg": {
@@ -186,7 +780,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "9cb14a806e165ff3f3bd84743c9d5fd8.jpg": {
@@ -196,21 +823,120 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "9e47fa0268560d9c60f98428f435b8c8.jpg": {
     "relative_path": "references/patterns/pattern_textile_inspired/9e47fa0268560d9c60f98428f435b8c8.jpg",
     "tags": {
       "motif": "interlocking organic shapes",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "9fcfb31bea97025c1382cee7085bc229.jpg": {
     "relative_path": "references/patterns/pattern_textile_inspired/9fcfb31bea97025c1382cee7085bc229.jpg",
     "tags": {
       "motif": "geometric grids, stripes",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "a05ea743ca7f97c01dda6087a7bf2b27.jpg": {
@@ -220,7 +946,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "a374a7be30f335357ecc6814d0dd5714.jpg": {
@@ -230,7 +989,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "a7000dab951ac2ce5c05ef74d3b2a8fe.jpg": {
@@ -240,7 +1032,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "a8cc86e39b55d2d5cfc4344c1b85fc89.jpg": {
@@ -250,7 +1075,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "d1dcc0cc79ac9b37c62f7fc9eccec957.jpg": {
@@ -260,7 +1118,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "f28625d0ca272d7bd3c5b8e5e49a4593.jpg": {
@@ -270,7 +1161,40 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "fbf372f0e146a49ef1826efa9b997a6e.jpg": {
@@ -280,7 +1204,40 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "fc24fd10ac2cb675d878812e961ff3d0.jpg": {
@@ -290,7 +1247,40 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "fc76762a6ee305b6ef5eab648566bf7d.jpg": {
@@ -301,7 +1291,40 @@
         "organic",
         "mon"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   },
   "ff577b4b32b982c44d8e4d856edbabb5.jpg": {
@@ -311,7 +1334,40 @@
       "style": [
         "abstract"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "authentic",
+        "grounded",
+        "natural",
+        "artisanal",
+        "earthy",
+        "soft",
+        "handcrafted"
+      ],
+      "industry": [
+        "coffee",
+        "tea",
+        "food",
+        "fashion",
+        "textile",
+        "craft",
+        "artisan",
+        "home decor",
+        "interior",
+        "bakery",
+        "restaurant",
+        "organic",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "weave",
+        "zigzag",
+        "organic",
+        "curvilinear",
+        "grid"
+      ]
     }
   }
 }

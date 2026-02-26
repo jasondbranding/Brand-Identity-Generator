@@ -21,7 +21,20 @@
         "authentic",
         "playful"
       ],
-      "industry": [],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
       "quality": 5
     }
   },
@@ -32,7 +45,38 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "15e02019f86f1c9cb1aedfa591f3e235.jpg": {
@@ -43,7 +87,38 @@
         "organic",
         "detailed"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "1f6d41c3f8bf62ba77bc10ee8f27e03d.jpg": {
@@ -53,7 +128,38 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "22cb3fdb1e5dbfe3e5370317d044211b.jpg": {
@@ -63,7 +169,38 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "37ef510c4235310dc3706d7a1b7d8bae.jpg": {
@@ -73,7 +210,38 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "3ec21d5c1f76cfb6a599d8ae16534e17.jpg": {
@@ -81,7 +249,38 @@
     "tags": {
       "motif": "Hand-drawn tribal symbols",
       "style": "",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "40219b13a0e9775df0d5cdf96e2bd994.jpg": {
@@ -89,7 +288,38 @@
     "tags": {
       "motif": "Dotted floral, geometric bands",
       "style": "",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "44c1bc44ba2614e6f97065f8c0bad6ff.jpg": {
@@ -97,7 +327,38 @@
     "tags": {
       "motif": "floral, paisley, geometric",
       "style": "",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "55627820b14f8a0a08b60f165350f8f6.jpg": {
@@ -105,21 +366,114 @@
     "tags": {
       "motif": "diverse abstract textures",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "5f11691aa32c5188c4588e4a80c182af.jpg": {
     "relative_path": "references/patterns/pattern_cultural_heritage/5f11691aa32c5188c4588e4a80c182af.jpg",
     "tags": {
       "motif": "ornate botanical, deer",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "6ac5413329599b0aac70872c6e9b8b10.jpg": {
     "relative_path": "references/patterns/pattern_cultural_heritage/6ac5413329599b0aac70872c6e9b8b10.jpg",
     "tags": {
       "motif": "ornate elephants, paisley, foliage",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "87557f0da59aec7c1f6ec9f17635268c.jpg": {
@@ -129,7 +483,38 @@
       "style": [
         "detailed"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "9d2b9d53c24fadd3a57527cb4dce90b0.jpg": {
@@ -137,7 +522,38 @@
     "tags": {
       "motif": "pixelated geometric patterns",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "a3b1a3b41a5d73a1e857d8319fd07379.jpg": {
@@ -145,14 +561,76 @@
     "tags": {
       "motif": "nested tribal triangles",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "a5ee63bd21390ce96e1907c3a41e950d.jpg": {
     "relative_path": "references/patterns/pattern_cultural_heritage/a5ee63bd21390ce96e1907c3a41e950d.jpg",
     "tags": {
       "motif": "Arabic calligraphy script",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "a95f8d430e9e1d3a5d7ba5bac3e53c34.jpg": {
@@ -160,7 +638,38 @@
     "tags": {
       "motif": "woven geometric strips",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "b45ab0287d5d93ec545c7f08f9805e55.jpg": {
@@ -170,7 +679,38 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "b7152c811a522a5e36de536d1aae8d86.jpg": {
@@ -180,14 +720,76 @@
       "style": [
         "geometric"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "c6b4393b9eb570612b1dc6871e251d62.jpg": {
     "relative_path": "references/patterns/pattern_cultural_heritage/c6b4393b9eb570612b1dc6871e251d62.jpg",
     "tags": {
       "motif": "seashells, ropes, hearts",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "d0d301a9f5e55f76a418088d9f2cd091.jpg": {
@@ -210,7 +812,21 @@
         "traditional",
         "wel"
       ],
-      "quality": 5
+      "quality": 5,
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ]
     }
   },
   "d1e25490bc2f1468556cffcd5286436e.jpg": {
@@ -220,7 +836,38 @@
       "style": [
         "organic"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "db00b65015367dd0660c0a20dfc678bf.jpg": {
@@ -228,14 +875,76 @@
     "tags": {
       "motif": "celestial and botanical blocks",
       "style": [],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "ea5048dbbe0c19cab8644682396958ec.jpg": {
     "relative_path": "references/patterns/pattern_cultural_heritage/ea5048dbbe0c19cab8644682396958ec.jpg",
     "tags": {
       "motif": "traditional batik patterns",
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   },
   "f516c49705357a8c1746a49ca45c66c0.jpg": {
@@ -245,7 +954,38 @@
       "style": [
         "pixel"
       ],
-      "quality": 5
+      "quality": 5,
+      "mood": [
+        "warm",
+        "energetic",
+        "authentic",
+        "traditional",
+        "vibrant",
+        "inviting",
+        "playful",
+        "bold"
+      ],
+      "industry": [
+        "coffee",
+        "food",
+        "craft",
+        "artisan",
+        "cultural",
+        "heritage",
+        "textile",
+        "fashion",
+        "restaurant",
+        "hotel",
+        "travel",
+        "handmade"
+      ],
+      "technique": [
+        "repetition",
+        "tessellation",
+        "line weight",
+        "symmetry",
+        "interlocking"
+      ]
     }
   }
 }
