@@ -201,29 +201,160 @@ Example output: ["saas", "tech", "startup", "minimal", "geometric", "confident",
     return list(user_keywords or [])
 
 
-# ── Spec → natural language prompt translators ────────────────────────────────
-# Order follows image-model best practice:
-#   1. Subject + form  →  2. Composition  →  3. Color  →  4. Style  →  5. Render  →  6. Avoid
+# ── Style DNA extraction (Fix #1 — Vision pre-extract) ────────────────────────
 
-def _logo_spec_to_prompt(spec, brand_name: str = "") -> str:
-    """Translate a LogoSpec (Pydantic model or dict) to a natural language image prompt.
+# Cache so we don't re-extract for every direction
+_style_dna_cache: dict = {}
 
-    All logo types use ONE color (monochrome rule).
-    For logotype / combination: text IS part of the mark — no text-ban clause.
-    For symbol / abstract_mark / lettermark: text is forbidden.
+
+def _extract_style_dna(img_path: Path) -> Optional[dict]:
+    """
+    Pre-process a style reference image through Gemini Vision to extract
+    concrete visual attributes. Returns a dict of hard constraints.
+
+    Cached so multiple directions don't repeat the Vision call for the same image.
+    """
+    cache_key = str(img_path)
+    if cache_key in _style_dna_cache:
+        return _style_dna_cache[cache_key]
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key or not img_path.exists():
+        return None
+
+    try:
+        import json as _json
+        client = genai.Client(api_key=api_key)
+
+        img_bytes = img_path.read_bytes()
+        ext = img_path.suffix.lower().lstrip(".")
+        mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
+
+        extract_prompt = (
+            "Analyze this logo/brand mark reference image. "
+            "Extract ONLY the technical visual rendering attributes. "
+            "Return a JSON object with these exact keys:\n\n"
+            '{\n'
+            '  "stroke_weight": "hairline | thin | medium | bold | ultra-bold",\n'
+            '  "corner_treatment": "sharp | slight-radius | fully-rounded",\n'
+            '  "shape_vocabulary": "geometric | organic | hybrid",\n'
+            '  "complexity": 1-5 (1=single simple shape, 5=complex multi-element illustration),\n'
+            '  "negative_space": "none | moderate | significant",\n'
+            '  "fill_style": "solid-fill | outline-only | mixed",\n'
+            '  "texture": "none | subtle-grain | heavy-texture | hand-drawn-imperfection",\n'
+            '  "rendering_medium": "clean-digital-vector | hand-drawn-ink | brush-calligraphy | '
+            'pencil-sketch | geometric-construction | engraved-etched",\n'
+            '  "color_count": number (how many distinct colors, ignoring background),\n'
+            '  "typography_class": "geometric-sans | humanist-sans | serif | slab-serif | '
+            'script | display | monospace | none",\n'
+            '  "overall_mood": "minimal | bold | elegant | playful | industrial | organic | editorial",\n'
+            '  "not_present": ["list of things explicitly NOT in this image, '
+            'e.g. gradients, shadows, 3D effects, textures"]\n'
+            '}\n\n'
+            "Return ONLY valid JSON. No explanation, no markdown fences."
+        )
+
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                types.Part.from_text(text=extract_prompt),
+                types.Part.from_bytes(data=img_bytes, mime_type=mime),
+            ],
+        )
+        text = resp.text.strip()
+        # Clean markdown fences if any
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+        dna = _json.loads(text)
+        _style_dna_cache[cache_key] = dna
+        console.print(
+            f"  [green]✓ style DNA extracted[/green] — "
+            f"stroke={dna.get('stroke_weight')}, "
+            f"shape={dna.get('shape_vocabulary')}, "
+            f"rendering={dna.get('rendering_medium')}, "
+            f"complexity={dna.get('complexity')}"
+        )
+        return dna
+    except Exception as e:
+        console.print(f"  [yellow]⚠ style DNA extraction failed: {e}[/yellow]")
+        return None
+
+
+def _style_dna_to_constraints(dna: dict) -> str:
+    """Convert extracted style DNA dict into hard constraint text for logo prompt."""
+    lines = []
+
+    stroke = dna.get("stroke_weight", "")
+    if stroke:
+        lines.append(f"{stroke} stroke weight")
+
+    corners = dna.get("corner_treatment", "")
+    if corners:
+        lines.append(f"{corners} corners")
+
+    shape = dna.get("shape_vocabulary", "")
+    if shape:
+        lines.append(f"{shape} shapes")
+
+    rendering = dna.get("rendering_medium", "")
+    if rendering:
+        lines.append(f"{rendering.replace('-', ' ')} rendering")
+
+    fill = dna.get("fill_style", "")
+    if fill:
+        lines.append(f"{fill.replace('-', ' ')}")
+
+    texture = dna.get("texture", "none")
+    if texture and texture != "none":
+        lines.append(f"{texture.replace('-', ' ')}")
+
+    complexity = dna.get("complexity", 0)
+    if complexity:
+        level_map = {1: "ultra-minimal single shape", 2: "simple mark", 3: "moderate detail",
+                     4: "detailed composition", 5: "complex multi-element illustration"}
+        lines.append(level_map.get(complexity, f"complexity level {complexity}"))
+
+    mood = dna.get("overall_mood", "")
+    if mood:
+        lines.append(f"{mood} aesthetic")
+
+    # Negative constraints from "not_present"
+    not_present = dna.get("not_present", [])
+    neg_lines = []
+    for item in not_present[:8]:
+        neg_lines.append(f"no {item}")
+
+    constraint_text = ", ".join(lines)
+    if neg_lines:
+        constraint_text += ". " + ", ".join(neg_lines)
+
+    return constraint_text
+
+
+# ── Spec → structured prompt translators ──────────────────────────────────────
+
+def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] = None) -> str:
+    """Translate a LogoSpec into a short, structured image generation prompt.
+
+    Uses keyword-structured format optimized for Imagen/Gemini image gen.
+    Kills verbose prose and non-visual adjectives. Every LogoSpec field is used.
 
     Args:
         spec: LogoSpec pydantic model or dict
         brand_name: actual brand name — used to validate lettermark initial
+        style_dna: optional pre-extracted visual attributes from _extract_style_dna()
     """
     d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     if not d:
         return str(spec)
 
     logo_type_raw  = d.get("logo_type", "abstract_mark")
-    logo_type      = logo_type_raw.replace("_", " ")
     form           = d.get("form", "")
-    composition    = d.get("composition", "centered, 20% padding all sides, pure white background")
+    composition    = d.get("composition", "centered, 20% padding, white background")
     color_hex      = d.get("color_hex", "#1A1A1A")
     color_name     = d.get("color_name", "")
     fill_style     = d.get("fill_style", "solid_fill")
@@ -233,107 +364,108 @@ def _logo_spec_to_prompt(spec, brand_name: str = "") -> str:
     metaphor       = d.get("metaphor", "")
     avoid          = d.get("avoid", [])
 
-    color_label = f"{color_name} {color_hex}".strip()
-
-    # ── Lettermark initial validation (Fix 1 defence) ─────────────────────
+    # ── Lettermark initial validation ─────────────────────────────────────
     if logo_type_raw == "lettermark" and brand_name:
         expected_initial = brand_name.strip()[0].upper() if brand_name.strip() else ""
         form_upper = form.upper()
-        # Check if the expected letter is mentioned in the form description
         if expected_initial and expected_initial not in form_upper:
             console.print(
-                f"  [yellow]⚠ Lettermark fix: form mentions wrong letter, "
-                f"expected '{expected_initial}' (from brand '{brand_name}'). Auto-patching.[/yellow]"
+                f"  [yellow]⚠ Lettermark fix: expected '{expected_initial}' "
+                f"(from '{brand_name}'). Auto-patching.[/yellow]"
             )
-            # Replace the first single uppercase letter reference in form with the correct one
             import re
-            # Find patterns like "uppercase X" or "letter X" and replace X with correct initial
             form = re.sub(
                 r'((?:uppercase|letter|capital)\s+)[A-Z]\b',
                 f'\\1{expected_initial}',
-                form,
-                count=1,
-                flags=re.IGNORECASE,
+                form, count=1, flags=re.IGNORECASE,
             )
-            # If no pattern found, prepend the correct letter
             if expected_initial not in form.upper():
                 form = f"uppercase {expected_initial}, {form}"
 
-    # ── Hard cliché avoids (Fix 3 defence) ────────────────────────────────
-    # These pictorial clichés are injected into every logo prompt's avoid list
-    # regardless of what the Director specified, as a last line of defence.
-    HARD_CLICHE_AVOIDS = [
-        "coffee cup", "mug", "teacup", "cup icon", "drinking vessel",
-        "coffee bean", "steam wisps", "fork", "spoon", "chef hat",
-        "lightbulb", "gear", "cog", "circuit board", "binary code",
-        "upward arrow", "growth chart", "dollar sign", "scales",
-        "stethoscope", "pill", "red cross", "heartbeat line",
-        "hanger", "mannequin", "scissors",
-        "house outline", "key silhouette", "location pin",
-    ]
+    # ── Build structured sections ─────────────────────────────────────────
 
-    fill_desc = {
-        "solid_fill":               f"solid flat fill in {color_label}",
-        "outline_only":             f"outline only in {color_label}, {stroke_wt} stroke weight, transparent interior",
-        "fill_with_outline_detail": f"solid fill in {color_label} with fine {stroke_wt} outline detail elements",
-    }.get(fill_style, f"filled in {color_label}")
+    # Section 1: Type + primary form (most attention weight)
+    type_label = logo_type_raw.replace("_", " ")
+    if logo_type_raw == "logotype":
+        subject = f"Brand logotype, {brand_name} as pure typography, {form}"
+    elif logo_type_raw == "combination":
+        subject = f"Combination mark logo, symbol + brand name '{brand_name}', {form}"
+    elif logo_type_raw == "lettermark":
+        subject = f"Lettermark logo, {form}"
+    else:
+        subject = f"{type_label.capitalize()} logo mark, {form}"
 
-    metaphor_clause = (
-        f" The form evokes {metaphor}."
-        if metaphor and metaphor.lower() not in ("", "abstract", "n/a") else ""
-    )
+    # Section 2: Fill + color (concrete visual attributes)
+    fill_map = {
+        "solid_fill": "solid flat fill",
+        "outline_only": f"outline only, {stroke_wt} stroke, transparent interior",
+        "fill_with_outline_detail": f"solid fill with {stroke_wt} outline details",
+    }
+    fill_desc = fill_map.get(fill_style, "solid flat fill")
+    color_section = f"{fill_desc}, {color_name} {color_hex}, monochrome single-color only"
 
-    # ── Type-specific text handling ───────────────────────────────────────────
+    # Section 3: Typography (required for logotype/combination)
     TEXT_ALLOWED_TYPES = ("logotype", "combination")
     is_text_type = logo_type_raw in TEXT_ALLOWED_TYPES
+    typo_section = ""
+    if is_text_type and typo_treatment and typo_treatment.lower() not in ("", "n/a"):
+        typo_section = f", {typo_treatment}"
 
-    # Build avoid list — never put "text"/"letterforms" in avoid for logotype/combination
+    # Section 4: Render style + composition
+    render_section = f"{render_style}, {composition}"
+
+    # Section 5: Style DNA constraints (from pre-extracted ref analysis)
+    dna_section = ""
+    if style_dna:
+        dna_text = _style_dna_to_constraints(style_dna)
+        if dna_text:
+            dna_section = f", MUST MATCH: {dna_text}"
+
+    # Section 6: Metaphor (if meaningful)
+    metaphor_section = ""
+    if metaphor and metaphor.lower() not in ("", "abstract", "n/a"):
+        metaphor_section = f", evoking {metaphor}"
+
+    # Section 7: Avoid list (hard constraints at end)
     avoid_items = [a for a in avoid if a]
     if not is_text_type:
-        # Ensure icon-only types always ban text even if Director forgot
-        text_bans = {"text", "letterforms", "words"}
-        current_lower = " ".join(avoid_items).lower()
-        for ban in text_bans:
-            if ban not in current_lower:
+        for ban in ("text", "letterforms", "words"):
+            if ban not in " ".join(avoid_items).lower():
                 avoid_items.insert(0, ban)
-    avoid_str = ", ".join(avoid_items) if avoid_items else "gradient, drop shadow, multiple colors"
+    # Inject hard cliché avoids
+    HARD_CLICHE_AVOIDS = [
+        "coffee cup", "mug", "coffee bean", "steam", "fork", "spoon",
+        "chef hat", "lightbulb", "gear", "circuit board", "upward arrow",
+        "dollar sign", "stethoscope", "hanger", "house outline", "location pin",
+    ]
+    existing_lower = " ".join(avoid_items).lower()
+    for cliche in HARD_CLICHE_AVOIDS:
+        if cliche not in existing_lower:
+            avoid_items.append(cliche)
+    # Always ban these rendering artifacts
+    for render_ban in ("gradient", "drop shadow", "3D effect", "photograph", "multiple colors"):
+        if render_ban not in existing_lower:
+            avoid_items.append(render_ban)
 
-    # ── Type-specific subject preamble ────────────────────────────────────────
-    typo_clause = (
-        f" Typography treatment: {typo_treatment}."
-        if typo_treatment and typo_treatment.lower() not in ("", "n/a") else ""
+    avoid_str = ", ".join(avoid_items)
+
+    # ── Assemble final structured prompt (target: 60-80 words) ────────────
+    # Text rule for icon-only types
+    text_rule = ""
+    if not is_text_type:
+        text_rule = ". No text, no words, no letters, no typography anywhere"
+
+    prompt = (
+        f"{subject}{typo_section}, "
+        f"{color_section}, "
+        f"{render_section}"
+        f"{dna_section}"
+        f"{metaphor_section}"
+        f"{text_rule}. "
+        f"AVOID: {avoid_str}."
     )
 
-    if logo_type_raw == "logotype":
-        subject = f"A brand logotype — the brand name rendered as pure typography: {form}.{typo_clause}"
-    elif logo_type_raw == "combination":
-        subject = f"A combination mark logo (symbol and brand name composed as one unit): {form}.{typo_clause}"
-    else:
-        subject = f"A single {logo_type} logo mark: {form}."
-
-    # ── No-text enforcement (only for icon types) ────────────────────────────
-    text_rule = (
-        ""
-        if is_text_type
-        else " Absolutely no text, words, letterforms, or typography anywhere in the image."
-    )
-
-    return (
-        # 1. Subject + form + typography
-        f"{subject} "
-        # 2. Composition
-        f"Composition: {composition}, pure white (#FFFFFF) background. "
-        # 3. Color — always monochrome regardless of logo type
-        f"Color: {fill_desc}. Strictly monochrome — one color only, no gradients, no tints, no second color. "
-        # 4. Style + metaphor
-        f"Visual style: {render_style}.{metaphor_clause} "
-        # 5. Render quality
-        "Crisp vector-like edges, high contrast, professional logo quality, scalable from 16px favicon to billboard. "
-        # 6. Text rule (icon types only)
-        + text_rule
-        # 7. Specific avoids
-        + f" Avoid: {avoid_str}."
-    )
+    return prompt
 
 
 def _pattern_spec_to_prompt(spec) -> str:
@@ -474,6 +606,15 @@ def _generate_direction_assets(
     # ── Resolve effective tags once for this direction ─────────────────────
     effective_keywords = _resolve_direction_tags(brief_text, direction, brief_keywords)
 
+    # ── Extract style DNA from user's ref images (cached) ─────────────────
+    style_dna: Optional[dict] = None
+    if style_ref_images:
+        for ref_path in style_ref_images[:1]:  # first ref = primary anchor
+            dna = _extract_style_dna(Path(ref_path))
+            if dna:
+                style_dna = dna
+                break
+
     # ── Translate structured JSON specs → natural language prompts ──────────
     # New schema: direction has logo_spec / pattern_spec / background_spec (Pydantic models)
     # Legacy fallback: direction has logo_prompt / pattern_prompt / background_prompt (str)
@@ -489,7 +630,7 @@ def _generate_direction_assets(
     bg_prompt      = _get_prompt("background_spec", "background_prompt", _bg_spec_to_prompt)
     logo_prompt    = _get_prompt(
         "logo_spec", "logo_prompt",
-        lambda spec: _logo_spec_to_prompt(spec, brand_name=brand_name),
+        lambda spec: _logo_spec_to_prompt(spec, brand_name=brand_name, style_dna=style_dna),
     )
     pattern_prompt = _get_prompt("pattern_spec",     "pattern_prompt",    _pattern_spec_to_prompt)
 
@@ -1038,21 +1179,14 @@ def _generate_image(
     if label == "logo":
         # Text rule depends on logo type (logotype/combination = text allowed)
         text_req = (
-            "- Brand name text is the intended output — render it with typographic precision\n"
-            "- No decorative elements, frames, or abstract symbols unless specified in the prompt\n"
+            "Render brand name text with typographic precision.\n"
             if logo_text_allowed else
-            "- Absolutely no text, words, letters, or typography anywhere in the image\n"
-            "- Single iconic mark/symbol only — no letterforms of any kind\n"
+            "No text, no words, no letters anywhere.\n"
         )
         full_prompt = (
             f"{prompt}{style_guide_block}\n\n"
-            "Technical requirements:\n"
             + text_req +
-            "- High contrast, clean crisp edges, professional vector quality\n"
-            "- Suitable for brand identity at any scale (favicon to billboard)\n"
-            "- Square format, generous padding (20%+ whitespace all sides)\n"
-            "- Clean vector-like rendering, bold and memorable\n"
-            "- The mark must be immediately recognizable and reproducible at small sizes"
+            "Square format, crisp vector edges, white background."
         )
     elif label == "pattern":
         full_prompt = (
@@ -1107,44 +1241,42 @@ def _generate_image(
             total_loaded = 0
 
             # ── Layer 0: style reference images (visual rendering anchor) ───
-            # These are user-chosen style refs — ALL logos must match their aesthetic.
-            # Highest priority: they define HOW the mark looks (render style, stroke, detail).
+            # Extract visual DNA from ref → inject as hard constraints.
+            # Image still attached for visual signal, but text constraints
+            # now specify exactly WHAT to match (not just "match this").
             style_refs_loaded = 0
             if label == "logo" and style_ref_images:
                 for i, img_path in enumerate(style_ref_images[:2]):  # max 2 style refs
                     try:
-                        img_bytes = Path(img_path).read_bytes()
-                        ext  = Path(img_path).suffix.lower().lstrip(".")
+                        ref_p = Path(img_path)
+                        img_bytes = ref_p.read_bytes()
+                        ext  = ref_p.suffix.lower().lstrip(".")
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
-                        parts.append(types.Part.from_text(
-                            text=(
-                                f"⭐ STYLE ANCHOR {i + 1} — MANDATORY RENDERING TEMPLATE\n\n"
-                                "CRITICAL INSTRUCTION: Your generated logo MUST look like it was made by "
-                                "THE SAME DESIGNER who made this reference image.\n\n"
-                                "You MUST copy these properties EXACTLY from this reference:\n"
-                                "  1. LINE QUALITY — if the ref uses hand-drawn/organic lines, your output "
-                                "     MUST also use hand-drawn/organic lines. If the ref uses clean vectors, "
-                                "     your output MUST also use clean vectors. NO EXCEPTIONS.\n"
-                                "  2. STROKE WEIGHT — match the exact thickness and weight of strokes.\n"
-                                "  3. FILL STYLE — if ref is outline-only, yours must be outline-only. "
-                                "     If ref is solid fill, yours must be solid fill.\n"
-                                "  4. DETAIL LEVEL — if ref is minimal/simple, yours must be minimal/simple. "
-                                "     If ref is detailed/complex, yours must be detailed/complex.\n"
-                                "  5. RENDERING MEDIUM — if ref looks hand-drawn/brush/ink, your output MUST "
-                                "     look hand-drawn/brush/ink. If ref looks digital/vector, yours MUST too.\n\n"
-                                "Your logo's CONCEPT and SUBJECT will be different from this reference, "
-                                "but the VISUAL EXECUTION (how it is drawn/rendered) must be identical.\n\n"
-                                "⛔ If this reference is hand-drawn/organic, DO NOT generate clean geometric "
-                                "vectors. If this reference is clean vectors, DO NOT generate hand-drawn marks."
+
+                        # Extract visual DNA (cached)
+                        dna = _extract_style_dna(ref_p)
+                        if dna:
+                            dna_constraints = _style_dna_to_constraints(dna)
+                            anchor_text = (
+                                f"⭐ STYLE ANCHOR {i + 1} — HARD CONSTRAINTS\n"
+                                f"Extracted rendering attributes: {dna_constraints}\n"
+                                f"Your output MUST match these attributes exactly. "
+                                f"Concept differs, rendering style is identical."
                             )
-                        ))
+                        else:
+                            anchor_text = (
+                                f"⭐ STYLE ANCHOR {i + 1} — Match this rendering style. "
+                                f"Same stroke weight, fill style, complexity, medium."
+                            )
+
+                        parts.append(types.Part.from_text(text=anchor_text))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
                         style_refs_loaded += 1
                         total_loaded += 1
                     except Exception:
                         pass
                 if style_refs_loaded:
-                    console.print(f"  [dim]style anchor injected: {style_refs_loaded} ref(s) — rendering technique locked[/dim]")
+                    console.print(f"  [dim]style anchor: {style_refs_loaded} ref(s) with DNA constraints[/dim]")
 
             # ── Layer 1: client moodboard images ──────────────────────────
             client_refs = list(moodboard_images or [])
