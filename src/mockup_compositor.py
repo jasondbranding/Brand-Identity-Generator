@@ -1906,6 +1906,10 @@ def composite_single_mockup(
     Composite brand assets onto a single processed mockup file.
     Used for progressive delivery — call once per mockup, send result immediately.
 
+    Strategy:
+      1. Try Pillow-based compositing first (HANDLER_MAP) — pixel-perfect, deterministic.
+      2. Fall back to AI reconstruction if Pillow fails or no handler exists.
+
     Returns the composited image Path on success, or None on failure.
     """
     if not processed_file.exists():
@@ -1923,18 +1927,44 @@ def composite_single_mockup(
     brand_name = getattr(assets, "brand_name", "") or assets.direction.direction_name
 
     try:
-        zones     = _extract_zones(processed_file)
-        zone_text = _zones_to_text(zones)
         original_path = _find_original(processed_file)
         if not original_path:
             console.print(f"  [yellow]⚠ {processed_file.name}: original not found — skipping[/yellow]")
             return None
 
+        # ── Strategy 1: Pillow-based compositing (deterministic, pixel-perfect) ──
+        handler = HANDLER_MAP.get(processed_file.name)
+        if handler:
+            try:
+                processed_img = Image.open(processed_file).convert("RGBA")
+                arr = np.array(processed_img)
+                canvas = Image.open(original_path).convert("RGBA")
+
+                result_label = handler(canvas, processed_img, assets, arr)
+                if result_label and result_label != "no zones":
+                    canvas.save(out_path, "PNG")
+                    console.print(
+                        f"  [green]✓[/green] {processed_file.stem} composited (Pillow: {result_label}) → {out_path.name}"
+                    )
+                    return out_path
+                else:
+                    console.print(
+                        f"  [dim]↳ Pillow handler returned '{result_label}' — falling back to AI[/dim]"
+                    )
+            except Exception as pillow_err:
+                console.print(
+                    f"  [dim]↳ Pillow compositing failed ({pillow_err}) — falling back to AI[/dim]"
+                )
+
+        # ── Strategy 2: AI reconstruction (fallback) ─────────────────────────────
+        zones     = _extract_zones(processed_file)
+        zone_text = _zones_to_text(zones)
+
         mockup_key = MOCKUP_KEY_MAP.get(processed_file.name, "")
         prompt = build_mockup_prompt(mockup_key, assets, brand_name, zone_text=zone_text)
 
         # Dark-background mockups need the white logo for contrast
-        DARK_BG_MOCKUPS = {"tote_bag_processed.jpg", "black_shirt_logo_processed.png", "tshirt_processed.png"}
+        DARK_BG_MOCKUPS = {"tote_bag_processed.jpg", "black_shirt_logo_processed.png", "tshirt_processed.png", "employee_id_card_processed.png"}
         if processed_file.name in DARK_BG_MOCKUPS:
             logo_for_ai = (
                 assets.logo_white
@@ -1962,7 +1992,7 @@ def composite_single_mockup(
 
         if ai_bytes:
             out_path.write_bytes(ai_bytes)
-            console.print(f"  [green]✓[/green] {processed_file.stem} composited → {out_path.name}")
+            console.print(f"  [green]✓[/green] {processed_file.stem} composited (AI) → {out_path.name}")
             return out_path
         else:
             console.print(f"  [yellow]⚠ {processed_file.stem}: all attempts failed[/yellow]")

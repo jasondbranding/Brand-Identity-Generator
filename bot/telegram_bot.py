@@ -1321,30 +1321,71 @@ def _fetch_preview_refs(brief, n: int = 4) -> list:
         product = getattr(brief, "product", "") or ""
         audience = getattr(brief, "audience", "") or ""
         tone = getattr(brief, "tone", "") or ""
-        kw_set = {w.lower() for w in kw + product.split() + audience.split() + tone.split() if len(w) > 2}
+        # Build keyword set from all brief fields — include individual words AND
+        # 2-word bigrams so Vietnamese compound terms like "cà phê" can match
+        all_words = kw + product.split() + audience.split() + tone.split()
+        kw_set = {w.lower() for w in all_words if len(w) > 1}
+        # Add bigrams for compound Vietnamese terms
+        for field_text in [product, audience, tone]:
+            words = field_text.lower().split()
+            for i in range(len(words) - 1):
+                bigram = f"{words[i]} {words[i+1]}"
+                kw_set.add(bigram)
 
         # Explicit keyword → industry folder mapping for better scoring
+        # Includes Vietnamese keywords so Vietnamese briefs match correctly
         INDUSTRY_MAP: dict = {
             "industry_food_beverage":    ["coffee", "cafe", "cafе", "drink", "beverage", "tea",
                                           "beer", "wine", "food", "restaurant", "bakery", "juice",
-                                          "milk", "water", "snack", "bar", "brew", "roast", "latte"],
+                                          "milk", "water", "snack", "bar", "brew", "roast", "latte",
+                                          # Vietnamese
+                                          "phê", "cà phê", "trà", "bia", "rượu", "đồ uống",
+                                          "thực phẩm", "nhà hàng", "bánh", "nước", "ăn",
+                                          "quán", "rang", "đặc sản", "ẩm thực", "thức uống",
+                                          "sinh tố", "nông sản", "hữu cơ", "organic"],
             "industry_fashion_beauty":   ["fashion", "beauty", "clothing", "apparel", "cosmetic",
                                           "makeup", "skincare", "hair", "luxury", "style", "wear",
-                                          "shoe", "bag", "jewelry", "perfume", "fragrance"],
+                                          "shoe", "bag", "jewelry", "perfume", "fragrance",
+                                          # Vietnamese
+                                          "thời trang", "đẹp", "mỹ phẩm", "quần áo", "trang sức",
+                                          "nước hoa", "da", "chăm sóc", "làm đẹp", "phụ kiện",
+                                          "giày", "túi", "sang trọng", "cao cấp"],
             "industry_finance_crypto":   ["finance", "fintech", "crypto", "bank", "invest", "fund",
-                                          "insurance", "payment", "wallet", "trading", "money"],
+                                          "insurance", "payment", "wallet", "trading", "money",
+                                          # Vietnamese
+                                          "tài chính", "ngân hàng", "đầu tư", "tiền",
+                                          "bảo hiểm", "thanh toán", "ví", "giao dịch"],
             "industry_healthcare_wellness": ["health", "wellness", "medical", "pharma", "clinic",
-                                             "fitness", "yoga", "sport", "gym", "supplement", "care"],
+                                             "fitness", "yoga", "sport", "gym", "supplement", "care",
+                                             # Vietnamese
+                                             "sức khỏe", "y tế", "dược", "phòng khám",
+                                             "thể dục", "gym", "thể thao", "chăm sóc",
+                                             "bệnh viện", "thuốc", "dinh dưỡng"],
             "industry_technology_saas":  ["tech", "software", "saas", "app", "digital", "ai",
-                                          "cloud", "data", "platform", "startup", "code", "developer"],
+                                          "cloud", "data", "platform", "startup", "code", "developer",
+                                          # Vietnamese
+                                          "công nghệ", "phần mềm", "ứng dụng", "số",
+                                          "dữ liệu", "nền tảng", "lập trình", "kỹ thuật số"],
             "industry_education_edtech": ["education", "learn", "school", "course", "training",
-                                          "university", "academy", "edtech", "tutor", "study"],
+                                          "university", "academy", "edtech", "tutor", "study",
+                                          # Vietnamese
+                                          "giáo dục", "học", "trường", "đào tạo",
+                                          "khóa học", "dạy", "sinh viên", "đại học"],
             "industry_media_gaming":     ["media", "gaming", "game", "entertainment", "music",
-                                          "video", "stream", "podcast", "creative", "art", "studio"],
+                                          "video", "stream", "podcast", "creative", "art", "studio",
+                                          # Vietnamese
+                                          "truyền thông", "trò chơi", "giải trí", "âm nhạc",
+                                          "sáng tạo", "nghệ thuật", "phim", "nội dung"],
             "industry_retail_ecommerce": ["retail", "shop", "store", "ecommerce", "brand",
-                                          "product", "market", "sell", "commerce"],
+                                          "product", "market", "sell", "commerce",
+                                          # Vietnamese
+                                          "bán lẻ", "cửa hàng", "thương mại", "sản phẩm",
+                                          "chợ", "mua bán", "thương hiệu"],
             "industry_real_estate":      ["real estate", "property", "home", "house", "architect",
-                                          "interior", "construction", "living", "space"],
+                                          "interior", "construction", "living", "space",
+                                          # Vietnamese
+                                          "bất động sản", "nhà", "xây dựng", "kiến trúc",
+                                          "nội thất", "căn hộ", "không gian"],
         }
         # Boost score for folders matching product/keyword industry
         industry_boosts: dict = {}
@@ -1529,12 +1570,13 @@ async def step_ref_choice_callback(update: Update, context: ContextTypes.DEFAULT
         brief = get_brief(context)
         # Store as style_ref_images (separate from general moodboard)
         brief.style_ref_images = chosen_paths
-        # Also prepend to moodboard_images so Director gets them as visual context
-        existing = list(getattr(brief, "moodboard_images", []) or [])
+        # ALSO store in logo_inspiration_paths (dataclass field) so write_to_temp_dir()
+        # writes them to the logo_inspiration/ subfolder for the pipeline to read
+        brief.logo_inspiration_paths = list(chosen_paths)
+        # Also prepend to moodboard_image_paths so Director gets them as visual context
         for p in reversed(chosen_paths):
-            if p not in existing:
-                existing.insert(0, p)
-        brief.moodboard_images = existing
+            if p not in brief.moodboard_image_paths:
+                brief.moodboard_image_paths.insert(0, p)
         await query.edit_message_text(
             f"✅ Đã chọn {len(chosen_paths)} style ref\\. Bắt đầu generate\\!",
             parse_mode=ParseMode.MARKDOWN_V2,
@@ -1592,11 +1634,13 @@ async def step_ref_upload_handler(update: Update, context: ContextTypes.DEFAULT_
     brief = get_brief(context)
     chosen_paths = [_Path(p) for p in uploads]
     brief.style_ref_images = chosen_paths
-    existing = list(getattr(brief, "moodboard_images", []) or [])
+    # ALSO store in logo_inspiration_paths (dataclass field) so write_to_temp_dir()
+    # writes them to the logo_inspiration/ subfolder for the pipeline to read
+    brief.logo_inspiration_paths = list(chosen_paths)
+    # Also prepend to moodboard_image_paths so Director gets visual context
     for p in reversed(chosen_paths):
-        if p not in existing:
-            existing.insert(0, p)
-    brief.moodboard_images = existing
+        if p not in brief.moodboard_image_paths:
+            brief.moodboard_image_paths.insert(0, p)
 
     if len(uploads) < 2:
         await message.reply_text(
@@ -2128,8 +2172,11 @@ async def step_palette_review_callback(update: Update, context: ContextTypes.DEF
 
 
 async def step_palette_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle free-text palette refinement when PALETTE_REVIEW_FLAG is set."""
+    """Handle free-text palette refinement when palette_refine_mode is set."""
     if not context.user_data.get(PALETTE_REVIEW_FLAG):
+        return
+    # Only process text if user clicked "✏️ Chỉnh sửa" (palette_refine_mode)
+    if not context.user_data.get("palette_refine_mode"):
         return
 
     text = update.message.text.strip()
@@ -2259,7 +2306,13 @@ def _fetch_pattern_refs(brief, n: int = 4) -> list:
         product = getattr(brief, "product", "") or ""
         audience = getattr(brief, "audience", "") or ""
         tone = getattr(brief, "tone", "") or ""
-        kw_set = {w.lower() for w in kw + product.split() + audience.split() + tone.split() if len(w) > 2}
+        # Build keyword set — include individual words AND bigrams for Vietnamese
+        all_words = kw + product.split() + audience.split() + tone.split()
+        kw_set = {w.lower() for w in all_words if len(w) > 1}
+        for field_text in [product, audience, tone]:
+            words = field_text.lower().split()
+            for i in range(len(words) - 1):
+                kw_set.add(f"{words[i]} {words[i+1]}")
 
         # Score every category dir using the KEYWORD_PATTERN_MAP from pattern_matcher
         try:
@@ -2328,6 +2381,9 @@ async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 
     # Fetch pattern ref suggestions
     ref_images = _fetch_pattern_refs(brief, n=4)
+    # Store suggestion paths so callback can retrieve them by index
+    context.user_data["pattern_suggestion_paths"] = [str(p) for p in ref_images] if ref_images else []
+
     if ref_images:
         from telegram import InputMediaPhoto
         media = []
@@ -2342,20 +2398,39 @@ async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: 
             except Exception:
                 pass
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📷 Tôi muốn upload ref", callback_data="patref_upload")],
-        [InlineKeyboardButton("⏭ Bỏ qua, tạo luôn", callback_data="patref_skip")],
-    ])
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
-            "🔲 *Bước tiếp theo\\: Hoạ tiết \\(Pattern\\)*\n\n"
-            "Trên đây là 4 gợi ý pattern phù hợp với brief của bạn\\.\n\n"
+    # Build keyboard with selection buttons for each suggested ref
+    rows = []
+    if ref_images:
+        select_row = [
+            InlineKeyboardButton(f"✅ Chọn {i}", callback_data=f"patref_select_{i}")
+            for i in range(1, len(ref_images) + 1)
+        ]
+        rows.append(select_row)
+    rows.append([InlineKeyboardButton("📷 Upload ref riêng", callback_data="patref_upload")])
+    rows.append([InlineKeyboardButton("⏭ Bỏ qua, tạo luôn", callback_data="patref_skip")])
+
+    kb = InlineKeyboardMarkup(rows)
+    text_msg = (
+        "🔲 *Bước tiếp theo\\: Hoạ tiết \\(Pattern\\)*\n\n"
+    )
+    if ref_images:
+        text_msg += (
+            "Trên đây là gợi ý pattern phù hợp với brief của bạn\\.\n\n"
             "Bạn có thể\\:\n"
+            "• Chọn 1 trong các ref gợi ý ở trên\n"
             "• Upload ảnh pattern ref của riêng bạn\n"
             "• Hoặc bỏ qua — bot sẽ tự chọn style phù hợp nhất\n\n"
             "_Sau khi chọn ref, bạn có thể mô tả thêm về pattern mong muốn\\._"
-        ),
+        )
+    else:
+        text_msg += (
+            "Upload ảnh pattern ref hoặc bỏ qua để bot tự tạo\\.\n\n"
+            "_Bạn có thể mô tả thêm về pattern mong muốn sau bước này\\._"
+        )
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text_msg,
         parse_mode=ParseMode.MARKDOWN_V2,
         reply_markup=kb,
     )
@@ -2364,12 +2439,39 @@ async def _start_pattern_ref_phase(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 
 
 async def step_pattern_ref_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle patref_upload / patref_skip callbacks."""
+    """Handle patref_select_N / patref_upload / patref_skip callbacks."""
     query = update.callback_query
     await query.answer()
     data = query.data
     chat_id = update.effective_chat.id
     logger.info(f"Pattern ref callback: {data}, flag={context.user_data.get(PATTERN_REF_FLAG)}")
+
+    # ── User selected a suggested pattern ref ─────────────────────────────────
+    if data.startswith("patref_select_"):
+        try:
+            idx = int(data.split("_")[-1]) - 1  # 0-based
+        except (ValueError, IndexError):
+            return
+        suggestion_paths = context.user_data.get("pattern_suggestion_paths", [])
+        if 0 <= idx < len(suggestion_paths):
+            from pathlib import Path as _Path
+            selected_path = _Path(suggestion_paths[idx])
+            if selected_path.exists():
+                context.user_data[PATTERN_REFS_KEY] = [str(selected_path)]
+                context.user_data[PATTERN_REF_FLAG] = False
+                await query.edit_message_text(
+                    f"✅ *Đã chọn pattern ref {idx + 1}\\!*",
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+                await _ask_pattern_description(context, chat_id)
+                return
+        await query.edit_message_text(
+            "❌ Ref không hợp lệ\\. Bỏ qua\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        context.user_data[PATTERN_REF_FLAG] = False
+        await _ask_pattern_description(context, chat_id)
+        return
 
     if data == "patref_upload":
         # Ensure flag is set so image handler picks up uploads
@@ -2605,8 +2707,11 @@ async def step_pattern_review_callback(update: Update, context: ContextTypes.DEF
 
 
 async def step_pattern_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle free-text pattern refinement when PATTERN_REVIEW_FLAG is set."""
+    """Handle free-text pattern refinement when pattern_refine_mode is set."""
     if not context.user_data.get(PATTERN_REVIEW_FLAG):
+        return
+    # Only process text if user clicked "✏️ Chỉnh sửa" (pattern_refine_mode)
+    if not context.user_data.get("pattern_refine_mode"):
         return
 
     text = update.message.text.strip()

@@ -179,6 +179,15 @@ class PipelineRunner:
 
             concept_cores = []
             style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
+            # Fallback: read from logo_inspiration/ subfolder written by ConversationBrief
+            if not style_ref_images:
+                logo_inspo_dir = brief_dir / "logo_inspiration"
+                if logo_inspo_dir.is_dir():
+                    _img_exts = {".png", ".jpg", ".jpeg", ".webp"}
+                    style_ref_images = sorted(
+                        p for p in logo_inspo_dir.iterdir()
+                        if p.suffix.lower() in _img_exts
+                    )
             try:
                 from src.director import generate_concept_cores
                 concept_cores = generate_concept_cores(brief)

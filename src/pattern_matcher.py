@@ -28,7 +28,7 @@ REFS_DIR     = PROJECT_ROOT / "references" / "patterns"
 
 # Keyword → pattern category mapping (for scoring without vision)
 KEYWORD_PATTERN_MAP: Dict[str, List[str]] = {
-    # Aesthetic keywords
+    # Aesthetic keywords (English)
     "geometric":    ["pattern_geometric_repeat", "pattern_minimal_geometric", "pattern_tech_grid_and_line"],
     "minimal":      ["pattern_minimal_geometric", "pattern_line_art_monoline"],
     "organic":      ["pattern_organic_fluid", "pattern_organic_natural"],
@@ -55,7 +55,7 @@ KEYWORD_PATTERN_MAP: Dict[str, List[str]] = {
     "clean":        ["pattern_minimal_geometric", "pattern_line_art_monoline"],
     "warm":         ["pattern_organic_natural", "pattern_textile_inspired"],
     "professional": ["pattern_minimal_geometric", "pattern_geometric_repeat", "pattern_tech_grid_and_line"],
-    # Industry keywords
+    # Industry keywords (English)
     "coffee":       ["pattern_organic_natural", "pattern_cultural_heritage", "pattern_textile_inspired"],
     "food":         ["pattern_organic_natural", "pattern_icon_based_repeating"],
     "fashion":      ["pattern_textile_inspired", "pattern_geometric_repeat", "pattern_line_art_monoline"],
@@ -67,6 +67,42 @@ KEYWORD_PATTERN_MAP: Dict[str, List[str]] = {
     "kids":         ["pattern_memphis_playful", "pattern_icon_based_repeating"],
     "gaming":       ["pattern_3d_abstract", "pattern_tech_grid_and_line"],
     "education":    ["pattern_icon_based_repeating", "pattern_minimal_geometric"],
+    # Vietnamese aesthetic keywords
+    "hình học":     ["pattern_geometric_repeat", "pattern_minimal_geometric"],
+    "tối giản":     ["pattern_minimal_geometric", "pattern_line_art_monoline"],
+    "tự nhiên":     ["pattern_organic_natural", "pattern_organic_fluid"],
+    "thiên nhiên":  ["pattern_organic_natural", "pattern_organic_fluid"],
+    "vui nhộn":     ["pattern_memphis_playful", "pattern_icon_based_repeating"],
+    "truyền thống": ["pattern_cultural_heritage", "pattern_textile_inspired"],
+    "dệt":         ["pattern_textile_inspired", "pattern_cultural_heritage"],
+    "số":          ["pattern_tech_grid_and_line", "pattern_abstract_gradient_mesh"],
+    "trừu tượng":  ["pattern_abstract_gradient_mesh", "pattern_3d_abstract"],
+    "thanh lịch":  ["pattern_minimal_geometric", "pattern_line_art_monoline", "pattern_textile_inspired"],
+    "hiện đại":    ["pattern_tech_grid_and_line", "pattern_minimal_geometric", "pattern_geometric_repeat"],
+    "cổ điển":     ["pattern_cultural_heritage", "pattern_textile_inspired"],
+    "sạch":        ["pattern_minimal_geometric", "pattern_line_art_monoline"],
+    "ấm":          ["pattern_organic_natural", "pattern_textile_inspired"],
+    "mạnh mẽ":     ["pattern_geometric_repeat", "pattern_memphis_playful"],
+    "chuyên nghiệp": ["pattern_minimal_geometric", "pattern_geometric_repeat", "pattern_tech_grid_and_line"],
+    # Vietnamese industry keywords
+    "phê":         ["pattern_organic_natural", "pattern_cultural_heritage", "pattern_textile_inspired"],
+    "cà phê":      ["pattern_organic_natural", "pattern_cultural_heritage", "pattern_textile_inspired"],
+    "trà":         ["pattern_organic_natural", "pattern_cultural_heritage"],
+    "thực phẩm":   ["pattern_organic_natural", "pattern_icon_based_repeating"],
+    "ẩm thực":     ["pattern_organic_natural", "pattern_icon_based_repeating", "pattern_cultural_heritage"],
+    "thời trang":  ["pattern_textile_inspired", "pattern_geometric_repeat", "pattern_line_art_monoline"],
+    "mỹ phẩm":    ["pattern_organic_fluid", "pattern_minimal_geometric"],
+    "làm đẹp":    ["pattern_organic_fluid", "pattern_minimal_geometric"],
+    "tài chính":   ["pattern_minimal_geometric", "pattern_geometric_repeat"],
+    "sức khỏe":   ["pattern_organic_fluid", "pattern_organic_natural"],
+    "công nghệ":   ["pattern_tech_grid_and_line", "pattern_minimal_geometric"],
+    "sang trọng":  ["pattern_minimal_geometric", "pattern_line_art_monoline", "pattern_geometric_repeat"],
+    "cao cấp":     ["pattern_minimal_geometric", "pattern_line_art_monoline"],
+    "trẻ em":      ["pattern_memphis_playful", "pattern_icon_based_repeating"],
+    "giáo dục":    ["pattern_icon_based_repeating", "pattern_minimal_geometric"],
+    "nông sản":    ["pattern_organic_natural", "pattern_cultural_heritage"],
+    "hữu cơ":     ["pattern_organic_natural", "pattern_organic_fluid"],
+    "đặc sản":    ["pattern_cultural_heritage", "pattern_organic_natural"],
 }
 
 
@@ -200,9 +236,9 @@ def build_pattern_prompt(
             if condensed:
                 parts.append(f"STYLE GUIDE RULES: {condensed}")
 
-    # ── 3. User description ────────────────────────────────────────────────
+    # ── 3. User description (HIGHEST PRIORITY — overrides base prompt) ─────
     if user_description and user_description.strip():
-        parts.append(f"USER REQUEST: {user_description.strip()}")
+        parts.insert(0, f"CRITICAL USER REQUEST (MUST FOLLOW): {user_description.strip()}")
 
     # ── 4. Palette colors ──────────────────────────────────────────────────
     if palette_colors:
@@ -210,9 +246,9 @@ def build_pattern_prompt(
         if hex_list:
             parts.append(f"Use EXACTLY these brand palette colors: {', '.join(hex_list)}.")
 
-    # ── 5. Refinement feedback ─────────────────────────────────────────────
+    # ── 5. Refinement feedback (HIGH PRIORITY — apply these changes) ────────
     if refinement_feedback and refinement_feedback.strip():
-        parts.append(f"REFINEMENT: {refinement_feedback.strip()}")
+        parts.insert(0, f"MANDATORY REFINEMENT (MUST APPLY): {refinement_feedback.strip()}")
 
     # ── 6. Technical quality anchors ───────────────────────────────────────
     parts.append(

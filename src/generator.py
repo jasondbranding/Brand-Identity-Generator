@@ -724,6 +724,7 @@ def generate_palette_only(
 
         # If refinement feedback is given, use Gemini to adjust colors
         fetch_keywords = list(effective_keywords or [])
+        gemini_adjusted = None
         if refinement_feedback:
             fetch_keywords.extend(refinement_feedback.lower().split())
             # Use Gemini to interpret feedback and generate adjusted color palette
@@ -734,6 +735,7 @@ def generate_palette_only(
                 )
                 if adjusted:
                     direction_color_dicts = adjusted
+                    gemini_adjusted = adjusted
                     console.print(
                         f"  [green]✓[/green] Palette adjusted by Gemini: "
                         f"{', '.join(c.get('hex','') for c in adjusted)}"
@@ -741,10 +743,23 @@ def generate_palette_only(
             except Exception as adj_err:
                 console.print(f"  [yellow]⚠ Gemini color adjust: {adj_err}[/yellow]")
 
-        enriched_colors = fetch_palette_for_direction(
-            keywords=fetch_keywords,
-            direction_colors=direction_color_dicts,
-        )
+        # If Gemini already adjusted the colors, use them directly as enriched_colors
+        # (skip fetch_palette_for_direction which may override Gemini's adjustments)
+        if gemini_adjusted:
+            # Ensure each color has required fields
+            enriched_colors = []
+            for i, c in enumerate(gemini_adjusted):
+                enriched_colors.append({
+                    "hex": c.get("hex", "#000000"),
+                    "name": c.get("name", f"Color {i+1}"),
+                    "role": c.get("role", "accent"),
+                    "source": "gemini_adjusted",
+                })
+        else:
+            enriched_colors = fetch_palette_for_direction(
+                keywords=fetch_keywords,
+                direction_colors=direction_color_dicts,
+            )
 
         if enriched_colors:
             palette_path = asset_dir / "palette.png"
