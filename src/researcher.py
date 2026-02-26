@@ -78,16 +78,11 @@ images (for logos, patterns, backgrounds separately).
 Format your response clearly with headers. Be specific and actionable.
 """
 
-QUERIES_PROMPT = """\
-Based on this brand brief, generate 5-8 specific visual reference search queries.
-Each query should be suitable for searching a design portfolio site like Dribbble.
-
-Brief: {brief_text}
-Keywords: {keywords}
-
-Return ONLY a JSON array of query strings, no explanation.
-Example: ["minimalist fintech logo geometric", "abstract finance pattern blue", "corporate identity clean tech"]
-"""
+# QUERIES_PROMPT removed — reference queries are already included in
+# RESEARCH_PROMPT_TEMPLATE bullet 4 ("Reference Searches"). The separate
+# Gemini call was wasting ~3-5s for output that was never actually used
+# to fetch images. The queries still appear in market_context text which
+# gets passed to the Director.
 
 
 class BrandResearcher:
@@ -162,38 +157,10 @@ class BrandResearcher:
         except Exception as e:
             console.print(f"  [yellow]⚠ Search grounding failed: {e}[/yellow]")
 
-        # ── Step 2: Generate reference image search queries ────────────────────
-        try:
-            console.print("  [dim]Generating reference search queries...[/dim]")
-            queries_prompt = QUERIES_PROMPT.format(
-                brief_text=brief_text[:1000],
-                keywords=kw_str,
-            )
-
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=queries_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
-            )
-
-            raw = (response.text or "").strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.rsplit("```", 1)[0]
-
-            queries = json.loads(raw)
-            if isinstance(queries, list):
-                result.reference_queries = [str(q) for q in queries[:8]]
-                console.print(
-                    f"  [dim]Generated {len(result.reference_queries)} reference queries[/dim]"
-                )
-
-        except Exception as e:
-            console.print(f"  [yellow]⚠ Query generation failed: {e}[/yellow]")
+        # Step 2 (reference query generation) removed — was a separate Gemini
+        # call producing queries nobody used. Reference search suggestions are
+        # already part of RESEARCH_PROMPT_TEMPLATE bullet 4 and appear in
+        # market_context text passed to the Director.
 
         return result
 

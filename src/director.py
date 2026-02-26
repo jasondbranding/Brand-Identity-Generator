@@ -245,41 +245,8 @@ class BrandDirectionsOutput(BaseModel):
     )
 
 
-# ── Concept Core — pre-pass ideation model ────────────────────────────────────
-
-class ConceptCore(BaseModel):
-    """
-    A single creative visual association for a brand — generated in a fast pre-pass
-    before the full direction generation. Represents ONE lateral, non-generic way to
-    visually express the brand's identity in a logo.
-    """
-    concept_name: str = Field(
-        description="Short evocative name for this concept territory. E.g. 'Terroir & Crescent', 'Handwritten Pause', 'The Threshold'"
-    )
-    visual_metaphor: str = Field(
-        description=(
-            "Specific, unexpected visual idea for the logo — concrete enough to brief a designer. "
-            "E.g. 'a coffee bean whose cross-section reveals highland contour lines — dual reading of origin and altitude' "
-            "or 'brand name in brush-stroke calligraphy, a single unbroken stroke — the ritual of morning' "
-            "or 'an abstract half-circle representing the horizon between highland and sky'. "
-            "Be specific. Never generic. Never obvious."
-        )
-    )
-    rationale: str = Field(
-        description="1 sentence: why this concept fits the brand AND avoids the most obvious metaphor."
-    )
-    logo_type_hint: Literal["symbol", "abstract_mark", "lettermark", "logotype", "combination"] = Field(
-        description="Which logo type best physically expresses this concept."
-    )
-    is_unexpected: bool = Field(
-        description="True if a non-designer would NOT immediately think of this when hearing the brand category. Should almost always be True."
-    )
-
-
-class ConceptCoreList(BaseModel):
-    cores: List[ConceptCore] = Field(
-        description="Exactly 4 creative visual concepts, each using a different conceptual territory and approach type."
-    )
+# ── ConceptCore removed — concept ideation is now handled internally by the
+# ── Director system prompt (Phase 1). No separate pre-pass call needed.
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -723,92 +690,11 @@ def _build_concept_constraints(brief_text: str, brief_keywords: list) -> str:
     return "\n".join(lines)
 
 
-# ── Concept ideation pre-pass ─────────────────────────────────────────────────
-
-CONCEPT_SYSTEM_PROMPT = """\
-You are a senior Art Director at a top brand consultancy. Your specialty is lateral thinking —
-finding the unexpected visual angle that makes a logo memorable, not generic.
-
-Your task: Given a brand brief, brainstorm exactly 4 distinct creative visual concepts
-for the brand's logo. Each concept must:
-
-1. Use a DIFFERENT conceptual territory (no two concepts can share the same metaphor type)
-2. Be SPECIFIC and CONCRETE — not "a leaf shape" but "a single coffee leaf folded at the mid-rib,
-   the negative space between fold halves suggesting both a mountain ridge and an open book"
-3. AVOID the first thing anyone would think of. Coffee → not coffee bean. Tech → not circuit board.
-4. Range from commercially accessible (Concept 1) to surprising/bold (Concept 4)
-5. Include at least one TYPOGRAPHIC approach (logo_type_hint: logotype or combination)
-   because sometimes "just great type" IS the most unexpected move
-
-Think in terms of: what does this brand MEAN, not what it DOES.
-Output structured JSON matching the ConceptCoreList schema.
-"""
-
-_CONCEPT_PROMPT_TEMPLATE = """\
-Brand name: {brand_name}
-Product/service: {product}
-Audience: {audience}
-Tone: {tone}
-Industry keywords: {keywords}
-Core promise: {core_promise}
-
-Generate 4 distinct, non-generic logo concept ideas for this brand.
-Each must explore a different visual territory. Be bold, be lateral, be specific.
-"""
-
-
-def generate_concept_cores(brief: "BriefData") -> List[ConceptCore]:
-    """
-    Fast pre-pass: generate 4 creative visual concepts before full direction generation.
-    Returns a list of ConceptCore objects to drive logo ideation.
-    Falls back gracefully to empty list on any error (pipeline continues without concepts).
-    """
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        return []
-
-    client = genai.Client(api_key=api_key)
-
-    prompt = _CONCEPT_PROMPT_TEMPLATE.format(
-        brand_name=getattr(brief, "brand_name", "Unknown"),
-        product=getattr(brief, "product_service", "")[:200],
-        audience=getattr(brief, "target_audience", "")[:150],
-        tone=getattr(brief, "tone", "")[:100],
-        keywords=", ".join(getattr(brief, "keywords", []) or []),
-        core_promise=getattr(brief, "core_promise", "")[:200],
-    )
-
-    # Inject cliché constraints so concept ideation is already anti-generic
-    brief_kw = list(getattr(brief, "keywords", []) or [])
-    brief_txt = getattr(brief, "raw_text", "") or prompt
-    constraints = _build_concept_constraints(brief_txt, brief_kw)
-    if constraints:
-        prompt += f"\n\n{constraints}"
-
-    console.print("\n[bold magenta]→ Concept ideation pass (pre-director)...[/bold magenta]")
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=CONCEPT_SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=ConceptCoreList,
-                temperature=1.0,   # high creativity for concept ideation
-                max_output_tokens=2000,
-            ),
-        )
-        raw = response.text or ""
-        parsed = ConceptCoreList.model_validate_json(raw)
-        cores = parsed.cores[:4]
-        console.print(f"  [dim]concept ideation: {len(cores)} concepts generated[/dim]")
-        for i, c in enumerate(cores, 1):
-            console.print(f"  [dim]  {i}. {c.concept_name} — {c.visual_metaphor[:80]}...[/dim]")
-        return cores
-    except Exception as exc:
-        console.print(f"  [yellow]concept ideation failed ({exc}), continuing without[/yellow]")
-        return []
+# ── Concept ideation pre-pass REMOVED ─────────────────────────────────────────
+# Concept ideation is now handled internally by the Director system prompt
+# (Phase 1: CONCEPT IDEATION). The separate generate_concept_cores() call,
+# ConceptCore model, CONCEPT_SYSTEM_PROMPT, and _CONCEPT_PROMPT_TEMPLATE
+# have been removed as dead code.
 
 
 # ── Director function ─────────────────────────────────────────────────────────
@@ -817,7 +703,6 @@ def generate_directions(
     brief: BriefData,
     refinement_feedback: Optional[str] = None,
     research_context: str = "",
-    concept_cores: Optional[List[ConceptCore]] = None,
     style_ref_paths: Optional[List[Path]] = None,
 ) -> BrandDirectionsOutput:
     """
@@ -827,7 +712,6 @@ def generate_directions(
         brief: Parsed brief data
         refinement_feedback: Optional human feedback for remix/adjust iterations
         research_context: Optional market research context from BrandResearcher
-        concept_cores: Optional pre-generated concept ideation from generate_concept_cores()
         style_ref_paths: Optional user-chosen reference images — ALL directions render in this style
 
     Returns:
@@ -839,26 +723,6 @@ def generate_directions(
 
     if research_context:
         user_message += f"\n\n---\n\n{research_context}"
-
-    # ── Inject pre-generated concept cores (from concept ideation pass) ───────
-    if concept_cores:
-        cores_block = (
-            "\n\n---\n\n## CONCEPT IDEATION — PRE-APPROVED VISUAL TERRITORIES\n\n"
-            "A concept ideation pass has already been run for this brief. "
-            "You MUST use these 4 concepts as the conceptual foundation for the logo in each direction. "
-            "Each concept maps to one direction (in order: Market-Aligned, Designer-Led, Hybrid, Wild Card). "
-            "The logo_spec must implement the visual_metaphor described. Do NOT invent different concepts.\n\n"
-        )
-        for i, core in enumerate(concept_cores[:4], 1):
-            cores_block += (
-                f"**Concept {i} → Direction {i} ({['Market-Aligned', 'Designer-Led', 'Hybrid', 'Wild Card'][i-1]})**\n"
-                f"  Name: {core.concept_name}\n"
-                f"  Visual metaphor: {core.visual_metaphor}\n"
-                f"  Rationale: {core.rationale}\n"
-                f"  Logo type: {core.logo_type_hint}\n\n"
-            )
-        user_message += cores_block
-        console.print(f"  [dim]concept cores injected ({len(concept_cores)} pre-ideated concepts)[/dim]")
 
     # ── Style ref instruction (all directions must render in same visual style) ─
     if style_ref_paths:

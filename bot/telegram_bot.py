@@ -32,7 +32,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from telegram import (
     Document,
@@ -1969,6 +1969,57 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ── Sub-phase: logo variants + palette generation ─────────────────────────────
 
+async def _run_mockup_background(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    chosen_assets: object,
+    output_dir: Path,
+    api_key: str,
+) -> List[Path]:
+    """
+    Background mockup compositing — fired right after logo variants are ready.
+    Runs ALL mockups in PARALLEL with palette + pattern HITL phases.
+
+    Returns list of composited mockup Paths.
+    """
+    loop = asyncio.get_event_loop()
+    from src.mockup_compositor import get_processed_mockup_files, composite_single_mockup
+
+    processed_files = get_processed_mockup_files()
+    mockup_paths: List[Path] = []
+
+    if not processed_files or not chosen_assets:
+        return mockup_paths
+
+    mockup_dir = output_dir / "mockups"
+    mockup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fire ALL mockups in parallel using asyncio.gather + run_in_executor
+    async def _do_one(pf):
+        try:
+            return await loop.run_in_executor(
+                None,
+                lambda: composite_single_mockup(
+                    processed_file=pf,
+                    assets=chosen_assets,
+                    api_key=api_key,
+                    mockup_dir=mockup_dir,
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Background mockup failed {pf.name}: {e}")
+            return None
+
+    results = await asyncio.gather(*[_do_one(pf) for pf in processed_files])
+
+    for composited in results:
+        if composited and composited.exists():
+            mockup_paths.append(composited)
+
+    logger.info(f"Background mockup done: {len(mockup_paths)}/{len(processed_files)}")
+    return mockup_paths
+
+
 async def _run_logo_variants_and_palette_phase(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -1983,6 +2034,7 @@ async def _run_logo_variants_and_palette_phase(
     """
     After logo is locked:
       1. Create logo variants (white/black/transparent + SVG) in background
+      1b. Fire mockup compositing in background (parallel with palette + pattern HITL)
       2. Generate palette
       3. Send both to user
       4. Enter palette HITL
@@ -2061,6 +2113,28 @@ async def _run_logo_variants_and_palette_phase(
     context.user_data["logo_svg_path"] = str(svg_path) if svg_path else None
     context.user_data["logo_svg_white_path"] = str(svg_white) if svg_white else None
     context.user_data["logo_svg_black_path"] = str(svg_black) if svg_black else None
+
+    # ── Step 1b: Fire mockup compositing in background ─────────────────────
+    # Mockups only need logo + direction colors (not HITL palette/pattern),
+    # so we can start them now and let them run parallel with palette + pattern HITL.
+    if chosen_assets:
+        # Patch logo variants into assets so mockup compositor can use them
+        for attr in ("logo_white", "logo_black", "logo_transparent"):
+            p = logo_variant_paths.get(attr)
+            if p and Path(p).exists():
+                setattr(chosen_assets, attr, Path(p))
+
+        mockup_task = asyncio.create_task(
+            _run_mockup_background(
+                context=context,
+                chat_id=chat_id,
+                chosen_assets=chosen_assets,
+                output_dir=output_dir,
+                api_key=api_key,
+            )
+        )
+        context.user_data["mockup_background_task"] = mockup_task
+        logger.info("Mockup background task fired — running parallel with palette + pattern HITL")
 
     # ── Step 2: Generate palette ──────────────────────────────────────────────
     progress_msg = await context.bot.send_message(
@@ -2737,7 +2811,12 @@ async def _run_mockup_and_zip_phase(
     chat_id: int,
 ) -> None:
     """
-    Final phase: composite mockups progressively, then export ZIP.
+    Final phase: await background mockup task (fired at logo lock),
+    send results, then export ZIP.
+
+    Mockups were started in parallel with palette + pattern HITL phases.
+    By the time user finishes reviewing palette + pattern, mockups should
+    already be done (or nearly done).
     """
     loop = asyncio.get_event_loop()
     chosen_direction = context.user_data.get(CHOSEN_DIR_KEY)
@@ -2773,47 +2852,84 @@ async def _run_mockup_and_zip_phase(
             if p and Path(p).exists():
                 setattr(chosen_assets, attr, Path(p))
 
-    # ── Mockups — composite each one and send immediately ─────────────────────
-    from src.mockup_compositor import get_processed_mockup_files, composite_single_mockup
+    # ── Mockups — await background task or run fresh if needed ────────────────
+    mockup_paths: List[Path] = []
+    mockup_task = context.user_data.pop("mockup_background_task", None)
 
-    processed_files = get_processed_mockup_files()
-    mockup_paths = []
-
-    if processed_files and chosen_assets:
+    if mockup_task and not mockup_task.done():
+        # Background task still running — show progress and wait
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"🧩 *Mockups* — đang composite {len(processed_files)} ảnh\\.\\.\\.",
+            text="🧩 *Mockups* — đang hoàn tất \\(đã chạy song song từ lúc chốt logo\\)\\.\\.\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
-        mockup_dir = output_dir / "mockups"
-        mockup_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            mockup_paths = await mockup_task
+        except Exception as e:
+            logger.warning(f"Background mockup task failed: {e}")
 
-        for pf in processed_files:
-            try:
-                composited = await loop.run_in_executor(
-                    None,
-                    lambda pf=pf: composite_single_mockup(
-                        processed_file=pf,
-                        assets=chosen_assets,
-                        api_key=api_key,
-                        mockup_dir=mockup_dir,
-                    ),
-                )
+    elif mockup_task and mockup_task.done():
+        # Background task already finished — grab results instantly
+        try:
+            mockup_paths = mockup_task.result()
+            logger.info(f"Mockup background task was already done: {len(mockup_paths)} mockups")
+        except Exception as e:
+            logger.warning(f"Background mockup task had error: {e}")
+
+    else:
+        # No background task (edge case: session restored, etc.) — run fresh parallel
+        logger.info("No background mockup task found — running mockups now (parallel)")
+        from src.mockup_compositor import get_processed_mockup_files, composite_single_mockup
+
+        processed_files = get_processed_mockup_files()
+        if processed_files and chosen_assets:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"🧩 *Mockups* — đang composite {len(processed_files)} ảnh\\.\\.\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            mockup_dir = output_dir / "mockups"
+            mockup_dir.mkdir(parents=True, exist_ok=True)
+
+            async def _do_one_fallback(pf):
+                try:
+                    return await loop.run_in_executor(
+                        None,
+                        lambda: composite_single_mockup(
+                            processed_file=pf,
+                            assets=chosen_assets,
+                            api_key=api_key,
+                            mockup_dir=mockup_dir,
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(f"Mockup composite failed {pf.name}: {e}")
+                    return None
+
+            results = await asyncio.gather(*[_do_one_fallback(pf) for pf in processed_files])
+            for composited in results:
                 if composited and composited.exists():
                     mockup_paths.append(composited)
-                    try:
-                        await context.bot.send_document(
-                            chat_id=chat_id,
-                            document=composited.read_bytes(),
-                            filename=composited.name,
-                            caption=f"🖼 Mockup: {pf.stem}",
-                        )
-                    except Exception as e:
-                        logger.warning(f"Mockup send failed {pf.stem}: {e}")
+
+    # ── Send mockup results to user ──────────────────────────────────────────
+    if mockup_paths:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🧩 *{len(mockup_paths)} mockups hoàn thành\\!*",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        for mp in mockup_paths:
+            try:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=mp.read_bytes(),
+                    filename=mp.name,
+                    caption=f"🖼 Mockup: {mp.stem}",
+                )
             except Exception as e:
-                logger.warning(f"Mockup composite failed {pf.name}: {e}")
+                logger.warning(f"Mockup send failed {mp.name}: {e}")
     else:
-        logger.info("No processed mockup files found — skipping mockup step")
+        logger.info("No mockup results to send")
 
     # ── ZIP export ────────────────────────────────────────────────────────────
     try:

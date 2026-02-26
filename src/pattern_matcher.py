@@ -176,9 +176,9 @@ def extract_pattern_rules(styleguide_path: Path) -> str:
 
     try:
         content = styleguide_path.read_text(encoding="utf-8")
-        # Find "For PATTERNS:" section (## or ###)
+        # Find "For PATTERNS:" section (##, ###, or ####)
         match = re.search(
-            r"#{2,3}\s+For\s+PATTERNS:\s*\n(.*?)(?=\n#{2,3}\s+For\s|\Z)",
+            r"#{2,4}\s+For\s+PATTERNS:\s*\n(.*?)(?=\n#{2,4}\s+For\s|\Z)",
             content,
             re.DOTALL | re.IGNORECASE,
         )
@@ -263,54 +263,67 @@ def build_pattern_prompt(
 def _condense_rules(rules_text: str) -> str:
     """
     Condense verbose styleguide rules into key prompt constraints.
-    Extracts motif types, style, avoid list, and grid info.
+    Extracts motif types, rendering style, vibe/mood, and avoid list.
+
+    Regex patterns are intentionally broad to handle format variations
+    across the 12 styleguide .md files (different heading levels,
+    bold markers, naming conventions).
     """
     condensed_parts: List[str] = []
 
-    # Extract motif types
-    motif_match = re.search(
-        r"Dominant Motif Types[:\*]*\s*(.+?)(?:\n\s*\*|\n\d\.|\Z)",
-        rules_text, re.DOTALL
+    def _extract_field(pattern: str, max_len: int = 200) -> str:
+        """Extract first match, clean up markdown artifacts, trim to max_len."""
+        m = re.search(pattern, rules_text, re.DOTALL | re.IGNORECASE)
+        if not m:
+            return ""
+        text = m.group(1).strip()
+        # Clean markdown bold/italic markers
+        text = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", text)
+        # Collapse multiple whitespace/newlines into single space
+        text = re.sub(r"\s+", " ", text)
+        if len(text) > max_len:
+            text = text[:max_len].rsplit(".", 1)[0] + "."
+        return text
+
+    # Extract motif types — handles "Dominant Motif Types", with or without
+    # bold markers, colons inside/outside bold, nested bullets
+    motif = _extract_field(
+        r"Dominant\s+Motif\s+Types\s*[:\*]*\s*(.+?)(?=\n\s*\*\s*\*\*|\n\d+\.\s|\Z)"
     )
-    if motif_match:
-        motif = motif_match.group(1).strip()
-        # Trim to first ~150 chars
-        if len(motif) > 200:
-            motif = motif[:200].rsplit(".", 1)[0] + "."
+    if motif:
         condensed_parts.append(f"Motifs: {motif}")
 
-    # Extract rendering style
-    render_match = re.search(
-        r"Rendering[:\*]*\s*(.+?)(?:\n\s*\*|\n\d\.|\Z)",
-        rules_text, re.DOTALL
+    # Extract rendering style — handles "Rendering", "Rendering Style",
+    # "Rendering:" with various markdown formatting
+    render = _extract_field(
+        r"Rendering(?:\s+Style)?\s*[:\*]*\s*(.+?)(?=\n\s*\*\s*\*\*|\n\d+\.\s|\Z)",
+        max_len=100,
     )
-    if render_match:
-        render = render_match.group(1).strip()
-        if len(render) > 100:
-            render = render[:100].rsplit(".", 1)[0] + "."
+    if render:
         condensed_parts.append(f"Style: {render}")
 
-    # Extract vibe
-    vibe_match = re.search(
-        r"Vibe[:\*]*\s*(.+?)(?:\n\s*\*|\n\d\.|\Z)",
-        rules_text, re.DOTALL
+    # Extract vibe/mood — handles "Vibe", "Overall Vibe", "Mood",
+    # "Emotional Feel", "Personality impact"
+    vibe = _extract_field(
+        r"(?:Overall\s+)?(?:Vibe|Mood|Emotional\s+Feel|Personality\s+impact)\s*[:\*]*\s*(.+?)(?=\n\s*\*\s*\*\*|\n\d+\.\s|\Z)",
+        max_len=100,
     )
-    if vibe_match:
-        vibe = vibe_match.group(1).strip()
-        if len(vibe) > 100:
-            vibe = vibe[:100].rsplit(".", 1)[0] + "."
+    if vibe:
         condensed_parts.append(f"Mood: {vibe}")
 
-    # Extract avoid list
+    # Extract avoid list — handles various formats:
+    # "6. **Avoid**", "#### 6. Avoid:", "### 6. Avoid (PATTERNS)"
     avoid_match = re.search(
-        r"Avoid\s*\n(.*?)(?=\n###|\Z)",
-        rules_text, re.DOTALL
+        r"Avoid(?:\s*\([^)]*\))?\s*[:\*]*\s*\n(.*?)(?=\n#{2,4}\s|\n\d+\.\s+\*\*|\Z)",
+        rules_text, re.DOTALL | re.IGNORECASE,
     )
     if avoid_match:
         avoid_lines = []
         for line in avoid_match.group(1).strip().split("\n"):
-            line = line.strip().lstrip("*- ")
-            if line:
+            line = line.strip().lstrip("*- ·•")
+            # Clean markdown bold
+            line = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", line).strip()
+            if line and len(line) > 3:
                 avoid_lines.append(line.rstrip("."))
         if avoid_lines:
             condensed_parts.append(f"Avoid: {'; '.join(avoid_lines[:5])}.")

@@ -504,57 +504,63 @@ def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] =
             if expected_initial not in form.upper():
                 form = f"uppercase {expected_initial}, {form}"
 
-    # ── Build structured sections ─────────────────────────────────────────
+    # ── Build keyword-stack prompt (PE-optimized format) ─────────────────
+    # Image gen models respond to keyword clusters, not prose sentences.
+    # Format: [SECTION]: comma-separated descriptors, ordered by attention priority.
+    # Section order = attention priority (first section gets most weight).
 
-    # Section 1: Type + primary form (most attention weight)
+    TEXT_ALLOWED_TYPES = ("logotype", "combination")
+    is_text_type = logo_type_raw in TEXT_ALLOWED_TYPES
+
+    # [LOGO TYPE]: most important signal — what kind of mark
     type_label = logo_type_raw.replace("_", " ")
     if logo_type_raw == "logotype":
-        subject = f"Brand logotype, {brand_name} as pure typography, {form}"
+        type_line = f"[LOGO TYPE]: brand logotype, '{brand_name}' as pure typography"
     elif logo_type_raw == "combination":
-        subject = f"Combination mark logo, symbol + brand name '{brand_name}', {form}"
+        type_line = f"[LOGO TYPE]: combination mark, symbol + brand name '{brand_name}'"
     elif logo_type_raw == "lettermark":
-        subject = f"Lettermark logo, {form}"
+        type_line = f"[LOGO TYPE]: lettermark logo, single letter mark"
     else:
-        subject = f"{type_label.capitalize()} logo mark, {form}"
+        type_line = f"[LOGO TYPE]: {type_label}, standalone mark, no text"
 
-    # Section 2: Fill + color (concrete visual attributes)
+    # [FORM]: concrete geometric description of the shape
+    form_line = f"[FORM]: {form}" if form else ""
+
+    # [COLOR]: fill + hex + monochrome constraint
     fill_map = {
         "solid_fill": "solid flat fill",
         "outline_only": f"outline only, {stroke_wt} stroke, transparent interior",
         "fill_with_outline_detail": f"solid fill with {stroke_wt} outline details",
     }
     fill_desc = fill_map.get(fill_style, "solid flat fill")
-    color_section = f"{fill_desc}, {color_name} {color_hex}, monochrome single-color only"
+    color_line = f"[COLOR]: {fill_desc}, {color_name} {color_hex}, monochrome single-color only"
 
-    # Section 3: Typography (required for logotype/combination)
-    TEXT_ALLOWED_TYPES = ("logotype", "combination")
-    is_text_type = logo_type_raw in TEXT_ALLOWED_TYPES
-    typo_section = ""
+    # [TYPOGRAPHY]: only for logotype/combination
+    typo_line = ""
     if is_text_type and typo_treatment and typo_treatment.lower() not in ("", "n/a"):
-        typo_section = f", {typo_treatment}"
+        typo_line = f"[TYPOGRAPHY]: {typo_treatment}"
 
-    # Section 4: Render style + composition
-    render_section = f"{render_style}, {composition}"
+    # [RENDER]: output quality + composition
+    render_line = f"[RENDER]: {render_style}, {composition}"
 
-    # Section 5: Style DNA constraints (from pre-extracted ref analysis)
-    dna_section = ""
+    # [STYLE DNA]: hard constraints from ref image analysis
+    dna_line = ""
     if style_dna:
         dna_text = _style_dna_to_constraints(style_dna)
         if dna_text:
-            dna_section = f", MUST MATCH: {dna_text}"
+            dna_line = f"[STYLE DNA]: MUST MATCH — {dna_text}"
 
-    # Section 6: Metaphor (if meaningful)
-    metaphor_section = ""
+    # [METAPHOR]: conceptual meaning (optional, low priority)
+    metaphor_line = ""
     if metaphor and metaphor.lower() not in ("", "abstract", "n/a"):
-        metaphor_section = f", evoking {metaphor}"
+        metaphor_line = f"[METAPHOR]: {metaphor}"
 
-    # Section 7: Avoid list (hard constraints at end)
+    # [FORBIDDEN]: hard avoid list — highest enforcement weight at end
     avoid_items = [a for a in avoid if a]
     if not is_text_type:
         for ban in ("text", "letterforms", "words"):
             if ban not in " ".join(avoid_items).lower():
                 avoid_items.insert(0, ban)
-    # Inject hard cliché avoids
     HARD_CLICHE_AVOIDS = [
         "coffee cup", "mug", "coffee bean", "steam", "fork", "spoon",
         "chef hat", "lightbulb", "gear", "circuit board", "upward arrow",
@@ -564,34 +570,27 @@ def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] =
     for cliche in HARD_CLICHE_AVOIDS:
         if cliche not in existing_lower:
             avoid_items.append(cliche)
-    # Always ban these rendering artifacts
     for render_ban in ("gradient", "drop shadow", "3D effect", "photograph", "multiple colors"):
         if render_ban not in existing_lower:
             avoid_items.append(render_ban)
+    forbidden_line = f"[FORBIDDEN]: {', '.join(avoid_items)}"
 
-    avoid_str = ", ".join(avoid_items)
+    # ── Assemble keyword-stack prompt ─────────────────────────────────────
+    lines = [type_line, form_line, color_line]
+    if typo_line:
+        lines.append(typo_line)
+    lines.append(render_line)
+    if dna_line:
+        lines.append(dna_line)
+    if metaphor_line:
+        lines.append(metaphor_line)
+    lines.append(forbidden_line)
 
-    # ── Assemble final structured prompt (target: 60-80 words) ────────────
-    # Text rule for icon-only types
-    text_rule = ""
-    if not is_text_type:
-        text_rule = ". No text, no words, no letters, no typography anywhere"
-
-    prompt = (
-        f"{subject}{typo_section}, "
-        f"{color_section}, "
-        f"{render_section}"
-        f"{dna_section}"
-        f"{metaphor_section}"
-        f"{text_rule}. "
-        f"AVOID: {avoid_str}."
-    )
-
-    return prompt
+    return "\n".join(line for line in lines if line)
 
 
 def _pattern_spec_to_prompt(spec) -> str:
-    """Translate a PatternSpec to a natural language image prompt."""
+    """Translate a PatternSpec to keyword-stack [SECTION]: format for image gen."""
     d = spec.model_dump() if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     if not d:
         return str(spec)
@@ -606,27 +605,31 @@ def _pattern_spec_to_prompt(spec) -> str:
     mood         = d.get("mood", "professional")
     avoid        = d.get("avoid", ["text", "logos"])
 
-    color_desc = f"primary motif color {primary_hex} on background {bg_hex}"
+    # ── [MOTIF]: primary signal ─────────────────────────────────────────────
+    motif_line = f"[MOTIF]: seamless repeating pattern tile, {motif}"
+    if density:
+        motif_line += f", density {density}"
+
+    # ── [COLOR]: palette specification ──────────────────────────────────────
+    color_parts = [f"primary motif {primary_hex}", f"background {bg_hex}"]
     if secondary_hex and secondary_hex.lower() not in ("none", ""):
-        color_desc += f", secondary accent {secondary_hex}"
+        color_parts.append(f"secondary accent {secondary_hex}")
     if opacity and opacity.lower() not in ("solid", ""):
-        color_desc += f" ({opacity})"
+        color_parts.append(opacity)
+    color_line = f"[COLOR]: {', '.join(color_parts)}"
 
-    density_clause = f" Scale and density: {density}." if density else ""
-    avoid_str = ", ".join(avoid)
+    # ── [RENDER]: style + mood ──────────────────────────────────────────────
+    render_line = f"[RENDER]: {render_style}, {mood}"
 
-    return (
-        # 1. Subject + motif
-        f"A seamless repeating pattern tile featuring {motif}.{density_clause} "
-        # 3. Color
-        f"Colors: {color_desc}. "
-        # 4. Style + mood
-        f"Rendering: {render_style}. Mood: {mood}. "
-        # 5. Technical quality
-        "All 4 edges align perfectly for seamless tiling. Professional surface/textile design quality. "
-        # 6. Avoids
-        f"Absolutely no: {avoid_str}."
-    )
+    # ── [TILING]: technical constraints ─────────────────────────────────────
+    tiling_line = "[TILING]: all 4 edges align perfectly, seamless infinite repeat, professional surface/textile quality"
+
+    # ── [FORBIDDEN]: avoid list ─────────────────────────────────────────────
+    avoid_items = avoid if isinstance(avoid, list) else [str(avoid)]
+    forbidden_line = f"[FORBIDDEN]: {', '.join(avoid_items)}"
+
+    lines = [motif_line, color_line, render_line, tiling_line, forbidden_line]
+    return "\n".join(lines)
 
 
 def _bg_spec_to_prompt(spec) -> str:
@@ -1343,12 +1346,20 @@ def _generate_image(
         )
     aspect_ratio = "16:9" if label == "background" else "1:1"
 
-    # ── Try Imagen 3 first ─────────────────────────────────────────────────────
-    img_bytes = _try_imagen(full_prompt, api_key, aspect_ratio)
-    if img_bytes:
-        save_path.write_bytes(img_bytes)
-        console.print(f"  [green]✓ {label}[/green] (Imagen 3) → {save_path.name}")
-        return save_path
+    # ── Try Imagen 3 first (text-only — skip when style refs exist) ──────────
+    # Imagen only accepts text prompts — no image input. When the user has
+    # provided style reference images, we MUST use Gemini multimodal so the
+    # ref images are actually seen by the model. Otherwise logo output won't
+    # match the user's chosen visual style.
+    has_visual_refs = bool(style_ref_images) or bool(moodboard_images)
+    if not has_visual_refs:
+        img_bytes = _try_imagen(full_prompt, api_key, aspect_ratio)
+        if img_bytes:
+            save_path.write_bytes(img_bytes)
+            console.print(f"  [green]✓ {label}[/green] (Imagen 3) → {save_path.name}")
+            return save_path
+    else:
+        console.print(f"  [dim]skipping Imagen (visual refs present) → Gemini multimodal[/dim]")
 
     # ── Fallback: Gemini 2.0 Flash ─────────────────────────────────────────────
     try:

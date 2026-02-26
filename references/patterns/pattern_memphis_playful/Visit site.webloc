@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>URL</key>
+	<string>https://stock.adobe.com/br/search/images?filters%5Bcontent_type:3d%5D=1&amp;filters%5Bcontent_type:audio%5D=0&amp;filters%5Bcontent_type:illustration%5D=1&amp;filters%5Bcontent_type:photo%5D=1&amp;filters%5Bcontent_type:template%5D=1&amp;filters%5Bcontent_type:video%5D=1&amp;filters%5Bcontent_type:zip_vector%5D=1&amp;filters%5Bfree_collection%5D=0&amp;filters%5Binclude_stock_enterprise%5D=0&amp;filters%5Bis_editorial%5D=0&amp;order=relevance&amp;serie_id=501523654&amp;utm_source=Pinterest&amp;utm_medium=organic</string>
+</dict>
+</plist>

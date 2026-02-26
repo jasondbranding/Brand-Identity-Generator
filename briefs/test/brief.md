@@ -30,7 +30,9 @@ Avoid: Highlands Coffee, Trung Nguyên — quá mass market, thiếu craft feel
 
 ## Keywords
 specialty coffee, craft roastery, single origin, artisan, Vietnamese coffee, third wave,
-warm, earthy, minimal, premium, heritage, handcrafted, sustainable, farm to cup
+warm, earthy, minimal, premium, heritage, handcrafted, sustainable, farm to cup,
+terroir-driven, slow roast, honest craft, quiet confidence, founder-led, soil to shelf,
+curated origin, sensory storytelling, intentional, unhurried, rooted
 
 ## Tagline
 Where origin speaks.
