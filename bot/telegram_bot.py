@@ -2774,12 +2774,43 @@ async def _run_pattern_generation(
     refinement_feedback: Optional[str] = None,
 ) -> None:
     """Generate pattern using refs + description + styleguide matching."""
+    import traceback as _tb
+    try:
+        await _run_pattern_generation_inner(context, chat_id, refinement_feedback)
+    except Exception as _top_err:
+        logger.error("_run_pattern_generation crashed", exc_info=True)
+        tb_lines = _tb.format_exception(type(_top_err), _top_err, _top_err.__traceback__)
+        tb_last = "".join(tb_lines[-3:])[:400]
+        err_type = type(_top_err).__name__
+        err_msg = str(_top_err)[:200]
+        debug_text = (
+            f"❌ *Lỗi tạo pattern* \\(`{escape_md(err_type)}`\\)\n\n"
+            f"`{escape_md(err_msg)}`\n\n"
+            f"_Traceback \\(last 3 frames\\):_\n```\n{escape_md(tb_last)}\n```"
+        )
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=debug_text, parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Pattern lỗi: {err_type}: {err_msg}\n\nGõ /cancel rồi /start để thử lại.",
+            )
+
+
+async def _run_pattern_generation_inner(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    refinement_feedback: Optional[str] = None,
+) -> None:
+    """Inner implementation of pattern generation (called by _run_pattern_generation)."""
     chosen_direction = context.user_data.get(CHOSEN_DIR_KEY)
     output_dir = Path(context.user_data.get(OUTPUT_DIR_KEY, "outputs/bot_unknown"))
     brief_dir_str = context.user_data.get(TEMP_DIR_KEY)
     brief_dir = Path(brief_dir_str) if brief_dir_str else None
     api_key = os.environ.get("GEMINI_API_KEY", "")
     brief = get_brief(context)
+
+    logger.info(f"[pattern] starting generation — chat={chat_id} direction={getattr(chosen_direction, 'option_number', '?')} feedback={refinement_feedback!r}")
 
     # ── Recover brief_dir if missing or deleted ────────────────────────────
     if not brief_dir or not brief_dir.exists():
@@ -2788,9 +2819,27 @@ async def _run_pattern_generation(
             context.user_data[TEMP_DIR_KEY] = str(brief_dir)
             logger.info(f"Recovered brief_dir for pattern phase → {brief_dir}")
 
+    if not brief_dir or not brief_dir.exists():
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Không tìm thấy brief\\_dir — thử lại từ đầu \\(/cancel → /start\\)\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    if not chosen_direction:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Chưa có direction được chọn — thử lại từ đầu \\(/cancel → /start\\)\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
     pattern_refs = [Path(p) for p in context.user_data.get(PATTERN_REFS_KEY, []) if Path(p).exists()]
     description = brief.pattern_description or None
     palette_colors = context.user_data.get(ENRICHED_COLORS_KEY)
+
+    logger.info(f"[pattern] refs={len(pattern_refs)} desc={description!r} palette={bool(palette_colors)}")
 
     progress_msg = await context.bot.send_message(
         chat_id=chat_id,
@@ -2814,6 +2863,8 @@ async def _run_pattern_generation(
         refinement_feedback=refinement_feedback,
     )
 
+    logger.info(f"[pattern] run_pattern_phase done — success={result.success} path={result.pattern_path}")
+
     if not result.success:
         await context.bot.send_message(
             chat_id=chat_id,
@@ -2836,6 +2887,9 @@ async def _run_pattern_generation(
             )
         except Exception as e:
             logger.warning(f"Pattern send failed: {e}")
+    else:
+        logger.warning(f"[pattern] pattern_path missing or does not exist: {result.pattern_path}")
+        await safe_edit(context, chat_id, progress_msg.message_id, "⚠️ *Hoạ tiết không có ảnh — sẽ hiển thị placeholder\\.*")
 
     # Pattern HITL keyboard
     kb = InlineKeyboardMarkup([

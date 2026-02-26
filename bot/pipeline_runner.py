@@ -387,13 +387,24 @@ class PipelineRunner:
         description: Optional[str] = None,
         palette_colors: Optional[List[dict]] = None,
         refinement_feedback: Optional[str] = None,
+        timeout_seconds: float = 300.0,
     ) -> "PatternPhaseResult":
         """Generate pattern for one direction, using styleguide matching + custom prompt."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._run_pattern_sync, direction, output_dir, brief_dir,
-            on_progress, pattern_refs, description, palette_colors, refinement_feedback,
-        )
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, self._run_pattern_sync, direction, output_dir, brief_dir,
+                    on_progress, pattern_refs, description, palette_colors, refinement_feedback,
+                ),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return PatternPhaseResult(
+                success=False,
+                output_dir=output_dir,
+                error=f"Pattern generation timed out after {int(timeout_seconds)}s — API may be slow. Try again.",
+            )
 
     def _run_pattern_sync(
         self,

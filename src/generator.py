@@ -1632,8 +1632,11 @@ def _generate_image(
                                 save_path.write_bytes(data)
                                 console.print(f"  [green]✓ {label}[/green] (simple fallback) → {save_path.name}")
                                 return save_path
-                    break
-                except Exception:
+                    # Model responded but with no image — try next model in ladder
+                    console.print(f"  [dim]{_gm2} returned no image in simple fallback — trying next model[/dim]")
+                    continue
+                except Exception as _gm2_err:
+                    console.print(f"  [dim]{_gm2} simple fallback failed: {_gm2_err}[/dim]")
                     continue
         except Exception as e2:
             console.print(f"  [yellow]⚠ {label} simple fallback also failed ({e2})[/yellow]")
