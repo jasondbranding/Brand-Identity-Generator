@@ -457,6 +457,73 @@ def _style_dna_to_constraints(dna: dict) -> str:
     return constraint_text
 
 
+def _pattern_dna_to_constraints(dna: dict) -> str:
+    """Convert extracted style DNA into pattern-specific constraint text."""
+    lines = []
+
+    stroke = dna.get("stroke_weight", "")
+    if stroke:
+        lines.append(f"{stroke} stroke weight on motif elements")
+
+    rendering = dna.get("rendering_medium", "")
+    if rendering:
+        lines.append(f"{rendering.replace('-', ' ')} rendering style")
+
+    shape = dna.get("shape_vocabulary", "")
+    if shape:
+        lines.append(f"{shape} shapes")
+
+    fill = dna.get("fill_style", "")
+    if fill:
+        lines.append(f"{fill.replace('-', ' ')} fill technique")
+
+    texture = dna.get("texture", "none")
+    if texture and texture != "none":
+        lines.append(f"{texture.replace('-', ' ')} texture")
+
+    complexity = dna.get("complexity", 0)
+    if complexity:
+        level_map = {
+            1: "ultra-minimal single-element motif",
+            2: "simple motif, minimal detail per unit",
+            3: "moderate detail per motif unit",
+            4: "detailed intricate motif",
+            5: "highly complex illustrated motif",
+        }
+        lines.append(level_map.get(complexity, f"complexity level {complexity}"))
+
+    mood = dna.get("overall_mood", "")
+    if mood:
+        lines.append(f"{mood} overall aesthetic")
+
+    not_present = dna.get("not_present", [])
+    neg_lines = [f"no {item}" for item in not_present[:6]]
+
+    constraint_text = ", ".join(lines)
+    if neg_lines:
+        constraint_text += ". " + ", ".join(neg_lines)
+
+    return constraint_text
+
+
+def _has_library_refs(ref_type: str) -> bool:
+    """
+    Quick check: does the reference library have any indexed images for this type?
+    Used to decide whether to prefer Gemini multimodal over Imagen 3.
+    """
+    try:
+        refs_dir = Path(__file__).parent.parent / "references" / ref_type
+        if not refs_dir.exists():
+            return False
+        return any(
+            (sub / "index.json").exists()
+            for sub in refs_dir.iterdir()
+            if sub.is_dir()
+        )
+    except Exception:
+        return False
+
+
 # ── Spec → structured prompt translators ──────────────────────────────────────
 
 def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] = None) -> str:
@@ -1396,12 +1463,21 @@ def _generate_image(
         )
     aspect_ratio = "16:9" if label == "background" else "1:1"
 
-    # ── Try Imagen 3 first (text-only — skip when style refs exist) ──────────
-    # Imagen only accepts text prompts — no image input. When the user has
-    # provided style reference images, we MUST use Gemini multimodal so the
-    # ref images are actually seen by the model. Otherwise logo output won't
-    # match the user's chosen visual style.
+    # ── Try Imagen 3 first (text-only — skip when visual refs exist) ────────
+    # Imagen only accepts text prompts — no image input. When the caller has
+    # visual reference images (user uploads or library), we MUST use Gemini
+    # multimodal so the model actually sees them.
+    #
+    # Special case: for pattern generation, always prefer Gemini multimodal
+    # when a library of reference images is available (references/patterns/).
+    # Imagen 3 can only read the text prompt, so it cannot benefit from the
+    # library refs. Gemini multimodal gets both the prompt AND the images.
     has_visual_refs = bool(style_ref_images) or bool(moodboard_images)
+    if label == "pattern" and not has_visual_refs and brief_keywords:
+        if _has_library_refs("patterns"):
+            has_visual_refs = True   # force Gemini so library refs can be shown
+            console.print("  [dim]pattern: library refs available → using Gemini multimodal[/dim]")
+
     if not has_visual_refs:
         img_bytes = _try_imagen(full_prompt, api_key, aspect_ratio)
         if img_bytes:
@@ -1428,39 +1504,62 @@ def _generate_image(
             parts       = [types.Part.from_text(text=full_prompt)]
             total_loaded = 0
 
-            # ── Layer 0: style reference images (visual rendering anchor) ───
-            # Extract visual DNA from ref → inject as hard constraints.
-            # Image still attached for visual signal, but text constraints
-            # now specify exactly WHAT to match (not just "match this").
+            # ── Layer 0: user-uploaded style/pattern ref images ──────────
+            # For LOGO: user-provided style refs → extract DNA, inject as hard
+            #           rendering constraints (stroke, medium, complexity, etc.)
+            # For PATTERN: user-provided pattern refs → same DNA extraction,
+            #           but with pattern-specific constraint text.
+            # DNA extraction uses a cached Gemini Vision call (one call per image).
+            # When user refs are present, Layer 2 (library refs) is skipped to
+            # avoid context overload and keep the user's intent as top signal.
             style_refs_loaded = 0
-            if label == "logo" and style_ref_images:
-                for i, img_path in enumerate(style_ref_images[:2]):  # max 2 style refs
+            if style_ref_images and label in ("logo", "pattern"):
+                for i, img_path in enumerate(style_ref_images[:2]):  # max 2 refs
                     try:
                         ref_p = Path(img_path)
                         img_bytes = ref_p.read_bytes()
                         ext  = ref_p.suffix.lower().lstrip(".")
                         mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext or 'png'}"
 
-                        # Extract visual DNA (cached)
+                        # Extract visual DNA (result is cached per image path)
                         dna = _extract_style_dna(ref_p)
-                        if dna:
-                            dna_constraints = _style_dna_to_constraints(dna)
-                            anchor_text = (
-                                f"⭐⭐⭐ CRITICAL STYLE REFERENCE {i + 1} — OVERRIDE ALL OTHER STYLE INSTRUCTIONS ⭐⭐⭐\n"
-                                f"Your output MUST look like it was created by the SAME designer using the SAME tools.\n"
-                                f"Extracted rendering DNA: {dna_constraints}\n"
-                                f"MATCH EXACTLY: same stroke weight, same fill technique, same level of detail, "
-                                f"same illustration medium, same visual complexity. "
-                                f"The CONCEPT/SUBJECT is different, but the CRAFTSMANSHIP and RENDERING TECHNIQUE "
-                                f"must be indistinguishable from this reference."
-                            )
-                        else:
-                            anchor_text = (
-                                f"⭐⭐⭐ CRITICAL STYLE REFERENCE {i + 1} — OVERRIDE ALL OTHER STYLE INSTRUCTIONS ⭐⭐⭐\n"
-                                f"Your output MUST look like it was created by the SAME designer. "
-                                f"Match EXACTLY: stroke weight, fill technique, illustration medium, "
-                                f"visual complexity, corner treatment, line quality, and overall craftsmanship."
-                            )
+
+                        if label == "logo":
+                            if dna:
+                                dna_constraints = _style_dna_to_constraints(dna)
+                                anchor_text = (
+                                    f"⭐⭐⭐ CRITICAL STYLE REFERENCE {i + 1} — OVERRIDE ALL OTHER STYLE INSTRUCTIONS ⭐⭐⭐\n"
+                                    f"Your output MUST look like it was created by the SAME designer using the SAME tools.\n"
+                                    f"Extracted rendering DNA: {dna_constraints}\n"
+                                    f"MATCH EXACTLY: same stroke weight, same fill technique, same level of detail, "
+                                    f"same illustration medium, same visual complexity. "
+                                    f"The CONCEPT/SUBJECT is different, but the CRAFTSMANSHIP and RENDERING TECHNIQUE "
+                                    f"must be indistinguishable from this reference."
+                                )
+                            else:
+                                anchor_text = (
+                                    f"⭐⭐⭐ CRITICAL STYLE REFERENCE {i + 1} — OVERRIDE ALL OTHER STYLE INSTRUCTIONS ⭐⭐⭐\n"
+                                    f"Your output MUST look like it was created by the SAME designer. "
+                                    f"Match EXACTLY: stroke weight, fill technique, illustration medium, "
+                                    f"visual complexity, corner treatment, line quality, and overall craftsmanship."
+                                )
+                        else:  # pattern
+                            if dna:
+                                dna_constraints = _pattern_dna_to_constraints(dna)
+                                anchor_text = (
+                                    f"⭐⭐⭐ CRITICAL PATTERN STYLE REFERENCE {i + 1} ⭐⭐⭐\n"
+                                    f"Extracted pattern visual DNA: {dna_constraints}\n"
+                                    f"Your output pattern MUST use the SAME rendering technique, "
+                                    f"stroke quality, motif density, fill style, and visual complexity "
+                                    f"as this reference. The subject/motif will differ but the CRAFT "
+                                    f"must be indistinguishable from this reference."
+                                )
+                            else:
+                                anchor_text = (
+                                    f"⭐⭐⭐ CRITICAL PATTERN STYLE REFERENCE {i + 1} ⭐⭐⭐\n"
+                                    f"Match EXACTLY: repetition density, stroke weight, fill technique, "
+                                    f"visual complexity, and rendering medium of this pattern reference."
+                                )
 
                         parts.append(types.Part.from_text(text=anchor_text))
                         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
@@ -1469,7 +1568,10 @@ def _generate_image(
                     except Exception:
                         pass
                 if style_refs_loaded:
-                    console.print(f"  [dim]style anchor: {style_refs_loaded} ref(s) with DNA constraints[/dim]")
+                    console.print(
+                        f"  [dim]{label} style anchor: {style_refs_loaded} user ref(s) "
+                        f"with DNA constraints injected[/dim]"
+                    )
 
             # ── Layer 1: client moodboard images ──────────────────────────
             client_refs = list(moodboard_images or [])
@@ -1499,7 +1601,13 @@ def _generate_image(
                 console.print(f"  [dim]moodboard refs injected: {n_client} client image(s)[/dim]")
 
             # ── Layer 2: library reference images ─────────────────────────
-            if brief_keywords:
+            # Skip when user-uploaded refs were already injected in Layer 0.
+            # Rationale: user refs are the strongest signal — mixing in library
+            # refs would dilute the style match. Library refs are only useful
+            # when the user has NOT provided any ref images of their own.
+            user_refs_injected = style_refs_loaded > 0
+            lib_images: list = []   # default; populated below if not skipped
+            if brief_keywords and not user_refs_injected:
                 ref_type_key = _ref_type_map[label]
                 lib_images   = _get_reference_images(brief_keywords, ref_type_key)
                 _cat_counter: dict = {}
