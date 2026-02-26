@@ -728,13 +728,19 @@ def generate_directions(
     # ── Style ref instruction (all directions must render in same visual style) ─
     if style_ref_paths:
         user_message += (
-            "\n\n---\n\n## STYLE REFERENCE — VISUAL RENDERING ANCHOR\n\n"
-            "The client has selected reference image(s) as their preferred visual rendering style. "
-            "ALL 4 directions MUST generate logos in the SAME visual aesthetic as these references. "
-            "The CONCEPT may differ per direction, but the RENDERING STYLE must match: "
-            "same illustration approach (flat vector / hand-drawn / geometric / organic), "
-            "same stroke weight philosophy, same level of detail and complexity. "
-            "The references define HOW it looks. Your concepts define WHAT is depicted.\n"
+            "\n\n---\n\n## ⭐ CRITICAL: STYLE REFERENCE — OVERRIDE RENDERING DECISIONS ⭐\n\n"
+            "The client has provided reference image(s) that define the EXACT visual rendering style.\n\n"
+            "**MANDATORY for ALL 4 directions:**\n"
+            "- `render_style` in each LogoSpec MUST describe the technique seen in the reference\n"
+            "- `fill_style` MUST match (solid_fill / outline_only / fill_with_outline_detail)\n"
+            "- `stroke_weight` MUST match what you see in the reference\n"
+            "- The overall visual craftsmanship must be indistinguishable from the reference\n\n"
+            "Think of it this way: the reference defines the DESIGNER and their TOOLS. "
+            "All 4 directions are different PROJECTS by that same designer. "
+            "The concepts differ, but the hand, the medium, and the rendering technique are identical.\n\n"
+            "DO NOT default to 'clean flat vector' if the reference is hand-drawn.\n"
+            "DO NOT use geometric construction if the reference is organic/fluid.\n"
+            "STUDY the reference carefully and describe its exact technique in render_style.\n"
         )
 
     # ── Inject anti-cliché + lateral territory constraints ────────────────────
@@ -778,9 +784,11 @@ def generate_directions(
                 if img_role == "style_ref":
                     loaded_style += 1
                     label = (
-                        f"⭐ STYLE REFERENCE {loaded_style} — "
-                        "ALL 4 directions must match this visual rendering style exactly. "
-                        "This defines the aesthetic: stroke weight, illustration approach, detail level."
+                        f"⭐⭐⭐ STYLE REFERENCE {loaded_style} — CRITICAL ⭐⭐⭐\n"
+                        "ALL 4 directions MUST render logos in this EXACT visual style. "
+                        "Study: stroke weight, fill technique, illustration medium, complexity level, "
+                        "corner treatment, line quality. Your render_style field MUST describe THIS technique. "
+                        "DO NOT default to generic 'clean flat vector' — describe what you SEE."
                     )
                 else:
                     loaded_mood += 1

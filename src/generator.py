@@ -576,12 +576,21 @@ def _logo_spec_to_prompt(spec, brand_name: str = "", style_dna: Optional[dict] =
     forbidden_line = f"[FORBIDDEN]: {', '.join(avoid_items)}"
 
     # ── Assemble keyword-stack prompt ─────────────────────────────────────
-    lines = [type_line, form_line, color_line]
-    if typo_line:
-        lines.append(typo_line)
-    lines.append(render_line)
+    # When style DNA exists, it takes HIGHEST priority — placed before everything
+    # else so Gemini sees it first. The DNA overrides any conflicting render_style
+    # from the Director spec.
+    lines = []
     if dna_line:
         lines.append(dna_line)
+    lines += [type_line, form_line, color_line]
+    if typo_line:
+        lines.append(typo_line)
+    if not dna_line:
+        # Only include RENDER line when no style DNA — DNA already defines rendering
+        lines.append(render_line)
+    else:
+        # With DNA, only keep composition from render_line (not style keywords)
+        lines.append(f"[RENDER]: {composition}")
     if metaphor_line:
         lines.append(metaphor_line)
     lines.append(forbidden_line)
@@ -1396,15 +1405,20 @@ def _generate_image(
                         if dna:
                             dna_constraints = _style_dna_to_constraints(dna)
                             anchor_text = (
-                                f"⭐ STYLE ANCHOR {i + 1} — HARD CONSTRAINTS\n"
-                                f"Extracted rendering attributes: {dna_constraints}\n"
-                                f"Your output MUST match these attributes exactly. "
-                                f"Concept differs, rendering style is identical."
+                                f"⭐⭐⭐ CRITICAL STYLE REFERENCE {i + 1} — OVERRIDE ALL OTHER STYLE INSTRUCTIONS ⭐⭐⭐\n"
+                                f"Your output MUST look like it was created by the SAME designer using the SAME tools.\n"
+                                f"Extracted rendering DNA: {dna_constraints}\n"
+                                f"MATCH EXACTLY: same stroke weight, same fill technique, same level of detail, "
+                                f"same illustration medium, same visual complexity. "
+                                f"The CONCEPT/SUBJECT is different, but the CRAFTSMANSHIP and RENDERING TECHNIQUE "
+                                f"must be indistinguishable from this reference."
                             )
                         else:
                             anchor_text = (
-                                f"⭐ STYLE ANCHOR {i + 1} — Match this rendering style. "
-                                f"Same stroke weight, fill style, complexity, medium."
+                                f"⭐⭐⭐ CRITICAL STYLE REFERENCE {i + 1} — OVERRIDE ALL OTHER STYLE INSTRUCTIONS ⭐⭐⭐\n"
+                                f"Your output MUST look like it was created by the SAME designer. "
+                                f"Match EXACTLY: stroke weight, fill technique, illustration medium, "
+                                f"visual complexity, corner treatment, line quality, and overall craftsmanship."
                             )
 
                         parts.append(types.Part.from_text(text=anchor_text))
