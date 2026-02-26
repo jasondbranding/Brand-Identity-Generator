@@ -785,8 +785,20 @@ def generate_directions(
 
     if refinement_feedback:
         user_message += (
-            f"\n\n---\n\n## REFINEMENT REQUEST\n{refinement_feedback}\n\n"
-            "Revise the directions accordingly. Keep what works, change what was requested."
+            f"\n\n---\n\n## ⭐ REFINEMENT REQUEST — MANDATORY TO FOLLOW ⭐\n\n"
+            f"{refinement_feedback}\n\n"
+            "### HOW TO USE THIS FEEDBACK:\n"
+            "- The user's feedback is ABOVE — it takes PRIORITY over the original brief.\n"
+            "- If the user references a direction by number or name (e.g. 'direction 4'), "
+            "use the PREVIOUS DIRECTIONS context provided to understand exactly what they meant.\n"
+            "- If the user requests a SPECIFIC visual element (e.g. 'whale with coffee cup'), "
+            "that element MUST appear in `logo_spec.form` of at least one direction.\n"
+            "- If the user requests a concept change, update `logo_concept`, `form`, and `metaphor` "
+            "to reflect the new concept precisely — do NOT keep the old concept unchanged.\n"
+            "- Keep render_style, color palette, and typography from existing directions "
+            "ONLY if the user did not ask to change them.\n"
+            "- Generate 4 new directions that incorporate this feedback. "
+            "Be LITERAL about the requested visual changes — do not interpret loosely."
         )
 
     console.print("\n[bold cyan]→ Gemini is analyzing the brief...[/bold cyan]")

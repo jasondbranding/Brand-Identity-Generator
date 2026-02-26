@@ -1973,6 +1973,31 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop("logo_refine_mode", None)
     context.user_data[LOGO_REVIEW_FLAG] = False
 
+    # ── Build enriched feedback: include previous 4 directions as context ──
+    # Without this, Director has no idea what "hướng 4" or "direction 2" means.
+    enriched_feedback = text
+    directions_output = context.user_data.get(DIRECTIONS_KEY)
+    if directions_output and hasattr(directions_output, "directions"):
+        try:
+            prev_lines = []
+            for d in directions_output.directions:
+                name  = getattr(d, "direction_name", "")
+                num   = getattr(d, "option_number", "?")
+                concept = getattr(d, "logo_concept", "") or getattr(d, "rationale", "")
+                # First sentence of logo_concept is enough
+                concept_short = concept.split(".")[0] if concept else ""
+                prev_lines.append(f"Direction {num} — \"{name}\": {concept_short}")
+            prev_summary = "\n".join(prev_lines)
+            enriched_feedback = (
+                f"USER FEEDBACK: {text}\n\n"
+                f"PREVIOUS 4 DIRECTIONS (for reference — user may reference them by number or name):\n"
+                f"{prev_summary}"
+            )
+            logger.info(f"Logo refine: enriched feedback built with {len(prev_lines)} previous directions")
+        except Exception as e:
+            logger.warning(f"Could not build enriched feedback: {e}")
+            enriched_feedback = text
+
     progress_msg = await update.message.reply_text(
         f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
         f"_\"{escape_md(text[:100])}\"_",
@@ -1987,7 +2012,7 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
             brief=brief,
             brief_dir=brief_dir,
             api_key=api_key,
-            refinement_feedback=text,
+            refinement_feedback=enriched_feedback,
         )
     )
 
