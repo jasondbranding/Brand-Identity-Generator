@@ -2046,18 +2046,29 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
 
     # ── Route: single-direction edit vs full regenerate ───────────────────────
     # If user clicked "Tạo lại 4 hướng" button, skip direction detection entirely
-    direction_num = None if force_regenerate else _extract_direction_number(text)
-    all_assets = context.user_data.get(ALL_ASSETS_KEY, {})
+    direction_num = None
+    try:
+        if not force_regenerate:
+            direction_num = _extract_direction_number(text)
+    except Exception as _dir_err:
+        logger.warning(f"_extract_direction_number failed: {_dir_err} — falling back to full regenerate")
+        direction_num = None
+
+    all_assets = context.user_data.get(ALL_ASSETS_KEY) or {}
     logo_path_for_edit: Optional[Path] = None
 
     if direction_num:
-        direction_assets = all_assets.get(direction_num)
-        raw_logo = getattr(direction_assets, "logo", None) if direction_assets else None
-        if raw_logo and Path(raw_logo).exists():
-            logo_path_for_edit = Path(raw_logo)
-            logger.info(f"Targeted edit mode: direction {direction_num}, logo={logo_path_for_edit.name}")
-        else:
-            logger.warning(f"Direction {direction_num} referenced but logo path not found — falling back to full regenerate")
+        try:
+            direction_assets = all_assets.get(direction_num)
+            raw_logo = getattr(direction_assets, "logo", None) if direction_assets else None
+            if raw_logo and Path(raw_logo).exists():
+                logo_path_for_edit = Path(raw_logo)
+                logger.info(f"Targeted edit mode: direction {direction_num}, logo={logo_path_for_edit.name}")
+            else:
+                logger.warning(f"Direction {direction_num} referenced but logo path not found — falling back to full regenerate")
+        except Exception as _asset_err:
+            logger.warning(f"Error resolving logo asset for direction {direction_num}: {_asset_err} — falling back to full regenerate")
+            logo_path_for_edit = None
 
     if logo_path_for_edit:
         # ── TARGETED EDIT: keep design, apply only the requested change ──────
@@ -2079,11 +2090,17 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
         )
     else:
         # ── FULL REGENERATE: no specific direction → gen 4 new directions ────
-        progress_msg = await update.message.reply_text(
-            f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
-            f"_\"{escape_md(text[:100])}\"_",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
+        try:
+            progress_msg = await update.message.reply_text(
+                f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
+                f"_\"{escape_md(text[:100])}\"_",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        except Exception as _md_err:
+            logger.error(f"MarkdownV2 reply failed in logo refine: {_md_err!r}")
+            progress_msg = await update.message.reply_text(
+                f"🔄 Đang tái tạo logos theo feedback...\n\n\"{text[:100]}\"",
+            )
         asyncio.create_task(
             _run_pipeline_phase1(
                 context=context,
@@ -3090,12 +3107,30 @@ def _cleanup(brief_dir: Path) -> None:
 # ── Error handler ─────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    import traceback as _tb
     logger.error("Exception while handling update:", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text(
-            "⚠️ Có lỗi xảy ra\\. Gõ /cancel rồi /start để thử lại\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
+        # Include exception type/message so it's visible without server log access
+        err = context.error
+        err_type = type(err).__name__ if err else "Unknown"
+        err_msg  = str(err)[:200] if err else ""
+        tb_lines = _tb.format_exception(type(err), err, err.__traceback__) if err else []
+        tb_last  = "".join(tb_lines[-3:])[:400] if tb_lines else ""
+        debug_text = (
+            f"⚠️ *Lỗi kỹ thuật* \\(`{escape_md(err_type)}`\\)\n\n"
+            f"`{escape_md(err_msg)}`\n\n"
+            f"_Traceback \\(last 3 frames\\):_\n```\n{escape_md(tb_last)}\n```"
         )
+        try:
+            await update.effective_message.reply_text(
+                debug_text,
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        except Exception:
+            # Fallback to plain text if debug_text itself has formatting issues
+            await update.effective_message.reply_text(
+                f"⚠️ Lỗi: {err_type}: {err_msg}\n\nGõ /cancel rồi /start để thử lại."
+            )
 
 
 # ── App builder ───────────────────────────────────────────────────────────────
