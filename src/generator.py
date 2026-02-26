@@ -96,12 +96,21 @@ def generate_all_assets(
     output_dir.mkdir(parents=True, exist_ok=True)
     results = {}
 
-    for direction in directions:
+    # ── Parallel generation: all 4 directions run concurrently ────────────
+    # Each direction's logo + pattern + palette are independent, so we run
+    # all 4 _generate_direction_assets() calls in parallel via ThreadPoolExecutor.
+    # This reduces total time from ~5min (serial) to ~1-1.5min.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time as _time
+
+    def _gen_one(direction):
+        """Generate assets for a single direction (runs in a worker thread)."""
         console.print(
             f"\n[bold cyan]→ Generating assets for Option {direction.option_number}: "
             f"{direction.direction_name}[/bold cyan]"
             + (" [logo only]" if logo_only else "")
         )
+        t0 = _time.monotonic()
         assets = _generate_direction_assets(
             direction, output_dir,
             brief_keywords=brief_keywords,
@@ -114,7 +123,27 @@ def generate_all_assets(
             style_ref_images=style_ref_images,
             logo_only=logo_only,
         )
-        results[direction.option_number] = assets
+        elapsed = _time.monotonic() - t0
+        console.print(
+            f"  [green]✓ Option {direction.option_number} done[/green] "
+            f"[dim]({elapsed:.1f}s)[/dim]"
+        )
+        return direction.option_number, assets
+
+    # Run up to 4 directions in parallel (Gemini API handles concurrent requests)
+    max_workers = min(len(directions), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_gen_one, d): d.option_number
+            for d in directions
+        }
+        for future in as_completed(futures):
+            try:
+                opt_num, assets = future.result()
+                results[opt_num] = assets
+            except Exception as exc:
+                opt_num = futures[future]
+                console.print(f"  [red]✗ Option {opt_num} failed: {exc}[/red]")
 
     return results
 
