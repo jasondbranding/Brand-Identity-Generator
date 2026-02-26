@@ -1726,9 +1726,14 @@ async def step_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return ConversationHandler.END
 
-    # confirm_go → launch pipeline directly, skipping ref suggestion
-    await query.edit_message_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
-    return await _launch_pipeline(update, context)
+    # confirm_go → ask user for their own ref (REF_UPLOAD state)
+    await query.edit_message_text(
+        "📁 *Upload ảnh ref của bạn (tuỳ chọn)\\.*\n\n"
+        "Gửi 1–2 ảnh logo theo style bạn muốn\\. AI sẽ học render style từ đó\\.\n\n"
+        "👉 _Hoặc gõ /skip để bỏ qua phần này và bắt đầu cấu trúc logo\\._",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    return REF_UPLOAD
 
 
 # ── Pipeline Phase 1: concept ideation + 4 logos ──────────────────────────────
