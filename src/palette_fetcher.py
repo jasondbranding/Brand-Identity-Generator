@@ -140,14 +140,44 @@ Example:
 [{{"hex": "#1E3A5F", "name": "Ocean Depth", "role": "primary"}}, {{"hex": "#4A90B8", "name": "Sky Current", "role": "secondary"}}, {{"hex": "#F2A922", "name": "Solar Flare", "role": "accent"}}, {{"hex": "#F8F6F2", "name": "Ivory Mist", "role": "background"}}, {{"hex": "#1A1A2E", "name": "Ink Night", "role": "text"}}, {{"hex": "#E8E4DF", "name": "Warm Stone", "role": "surface"}}]
 """
 
+# Variant used when user explicitly provides color feedback — direction colors are IGNORED
+PALETTE_FEEDBACK_PROMPT = """\
+You are an expert brand color palette designer. The user has explicitly requested \
+a palette change. You MUST follow their feedback exactly.
+
+⭐ USER FEEDBACK (MANDATORY — override everything else): {feedback}
+
+BRAND KEYWORDS (context only): {keywords}
+
+REQUIREMENTS:
+1. The user's feedback describes the MAIN COLOR TONES you must use — follow it literally.
+2. Generate exactly 6 colors with hierarchy: primary, secondary, accent, background, text, surface
+3. Primary and secondary colors MUST reflect the tones/colors the user requested
+4. Colors must be harmonious and work together as a cohesive brand system
+5. Ensure sufficient contrast between text and background (WCAG AA)
+6. Background should be a light neutral; text should be dark with high contrast
+7. Each color name should be evocative and brand-appropriate
+8. Do NOT reuse or reference the old palette — generate a completely fresh palette
+
+Return ONLY a JSON array of exactly 6 objects. No explanation, no markdown fences.
+Each object: {{"hex": "#RRGGBB", "name": "Evocative Name", "role": "primary|secondary|accent|background|text|surface"}}
+
+Example for "ocean blue & brown" feedback:
+[{{"hex": "#1A4D6E", "name": "Deep Ocean", "role": "primary"}}, {{"hex": "#5C3A1E", "name": "Roasted Oak", "role": "secondary"}}, {{"hex": "#2E8BC0", "name": "Coastal Wave", "role": "accent"}}, {{"hex": "#F7F5F2", "name": "Sea Foam", "role": "background"}}, {{"hex": "#1C1C1C", "name": "Midnight", "role": "text"}}, {{"hex": "#E8E0D8", "name": "Driftwood", "role": "surface"}}]
+"""
+
 
 def _generate_palette_with_gemini(
     keywords: List[str],
     direction_colors: List[Dict],
+    refinement_feedback: Optional[str] = None,
 ) -> Optional[List[Dict]]:
     """
     Use Gemini to generate a 6-color brand palette based on keywords
     and direction colors as context.
+
+    If refinement_feedback is provided, uses the PALETTE_FEEDBACK_PROMPT which
+    prioritises the user's explicit color request over the original direction colors.
 
     Returns list of color dicts [{hex, name, role}, ...] or None on failure.
     """
@@ -162,20 +192,27 @@ def _generate_palette_with_gemini(
         console.print("  [yellow]⚠ GEMINI_API_KEY not set[/yellow]")
         return None
 
-    # Build direction color summary
-    direction_summary = "\n".join(
-        f"  - {c.get('role', 'unknown')}: {c.get('hex', '?')} ({c.get('name', '?')})"
-        for c in direction_colors
-    )
-    if not direction_summary:
-        direction_summary = "  (none provided)"
-
     keywords_str = ", ".join(keywords) if keywords else "modern, professional"
 
-    prompt = PALETTE_PROMPT.format(
-        keywords=keywords_str,
-        direction_summary=direction_summary,
-    )
+    if refinement_feedback:
+        # User explicitly told us what colors they want — don't use direction colors
+        prompt = PALETTE_FEEDBACK_PROMPT.format(
+            feedback=refinement_feedback,
+            keywords=keywords_str,
+        )
+    else:
+        # Build direction color summary for the normal (no-feedback) case
+        direction_summary = "\n".join(
+            f"  - {c.get('role', 'unknown')}: {c.get('hex', '?')} ({c.get('name', '?')})"
+            for c in direction_colors
+        )
+        if not direction_summary:
+            direction_summary = "  (none provided)"
+
+        prompt = PALETTE_PROMPT.format(
+            keywords=keywords_str,
+            direction_summary=direction_summary,
+        )
 
     try:
         client = genai.Client(api_key=api_key)
@@ -230,36 +267,53 @@ def fetch_palette_for_direction(
     keywords: List[str],
     direction_colors: List[Dict],
     top_n: int = 1,
+    refinement_feedback: Optional[str] = None,
 ) -> List[Dict]:
     """
     Generate the best color palette for a brand direction using Gemini AI.
 
     Strategy:
-      1. Use Gemini to generate a context-aware 6-color palette based on
-         brand keywords and direction colors
-      2. Fallback: enrich and return the original AI palette from the direction
+      1. If refinement_feedback is given: use feedback-first prompt (ignores direction colors)
+      2. Otherwise: use Gemini with direction colors as starting-point context
+      3. Fallback: enrich and return the original AI palette from the direction
 
     Args:
-        keywords:         Brand keywords (from brief + Gemini auto-tags)
-        direction_colors: AI-generated palette dicts (hex, name, role)
-        top_n:            Number of palettes to return (kept for API compat)
+        keywords:             Brand keywords (from brief + Gemini auto-tags)
+        direction_colors:     AI-generated palette dicts (hex, name, role)
+        top_n:                Number of palettes to return (kept for API compat)
+        refinement_feedback:  Optional user feedback — overrides direction colors when set
 
     Returns:
         List of enriched color dicts: {hex, name, role, cmyk, source}
     """
-    console.print(
-        f"  [dim]Generating palette with Gemini "
-        f"(keywords: {', '.join(keywords[:5]) if keywords else 'none'})…[/dim]"
-    )
+    if refinement_feedback:
+        console.print(
+            f"  [dim]Generating palette with Gemini (feedback override: \"{refinement_feedback[:60]}\")…[/dim]"
+        )
+    else:
+        console.print(
+            f"  [dim]Generating palette with Gemini "
+            f"(keywords: {', '.join(keywords[:5]) if keywords else 'none'})…[/dim]"
+        )
 
     # ── Step 1: Gemini palette generation ────────────────────────────────────
-    gemini_colors = _generate_palette_with_gemini(keywords, direction_colors)
+    gemini_colors = _generate_palette_with_gemini(
+        keywords, direction_colors, refinement_feedback=refinement_feedback
+    )
 
     if gemini_colors:
         return _build_gemini_palette(gemini_colors)
 
     # ── Step 2: Fallback → enrich direction colors ──────────────────────────
-    console.print("  [dim]Gemini unavailable, using direction palette[/dim]")
+    # NOTE: When feedback was given, this fallback uses original direction colors
+    # because Gemini failed — log a warning so the issue is visible.
+    if refinement_feedback:
+        console.print(
+            "  [yellow]⚠ Gemini feedback-palette failed — falling back to direction colors. "
+            "Palette may not reflect user feedback.[/yellow]"
+        )
+    else:
+        console.print("  [dim]Gemini unavailable, using direction palette[/dim]")
     return _enrich_ai_palette(direction_colors)
 
 

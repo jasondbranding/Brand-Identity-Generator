@@ -989,13 +989,34 @@ def _adjust_colors_with_gemini(
 
         colors = _json.loads(text)
         if isinstance(colors, list) and len(colors) >= 2:
-            # Validate each has hex
+            # Normalize and validate each hex (Gemini sometimes omits the '#')
+            normalized = []
             for c in colors:
-                if not c.get("hex", "").startswith("#"):
-                    return None
-            return colors
+                h = c.get("hex", "").strip()
+                if not h:
+                    continue
+                if not h.startswith("#"):
+                    h = "#" + h
+                # Accept only 7-char hex (#RRGGBB); skip anything else
+                if len(h) != 7:
+                    continue
+                normalized.append({**c, "hex": h.upper()})
+            if len(normalized) >= 2:
+                console.print(
+                    f"  [green]✓[/green] Gemini color-adjust returned: "
+                    f"{', '.join(c['hex'] for c in normalized)}"
+                )
+                return normalized
+            console.print(
+                f"  [yellow]⚠ _adjust_colors_with_gemini: only {len(normalized)} valid after normalize[/yellow]"
+            )
+        else:
+            console.print(
+                f"  [yellow]⚠ _adjust_colors_with_gemini: unexpected response type/length — {str(text)[:120]}[/yellow]"
+            )
         return None
-    except Exception:
+    except Exception as _e:
+        console.print(f"  [yellow]⚠ _adjust_colors_with_gemini failed: {type(_e).__name__}: {_e}[/yellow]")
         return None
 
 
@@ -1066,9 +1087,13 @@ def generate_palette_only(
                     "source": "gemini_adjusted",
                 })
         else:
+            # Pass refinement_feedback so fetch_palette_for_direction uses the
+            # feedback-first prompt (PALETTE_FEEDBACK_PROMPT) instead of relying
+            # on the original direction colors — this prevents the "same palette" bug
             enriched_colors = fetch_palette_for_direction(
                 keywords=fetch_keywords,
                 direction_colors=direction_color_dicts,
+                refinement_feedback=refinement_feedback or None,
             )
 
         if enriched_colors:
