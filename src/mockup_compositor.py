@@ -1814,6 +1814,65 @@ def composite_all_mockups(
 
     results: Dict[int, List[Path]] = {}
 
+    # ── Dark-background mockup set — need white logo for contrast ─────────
+    DARK_BG_MOCKUPS = {
+        "tote_bag_processed.jpg",
+        "black_shirt_logo_processed.png",
+        "tshirt_processed.png",
+        "employee_id_card_processed.png",
+    }
+
+    def _composite_one(mp, assets, mockup_dir, brand_name, _api_key):
+        """Composite 1 mockup file (runs in worker thread)."""
+        out_path = mockup_dir / (mp.stem + "_composite.png")
+
+        # Step 1: Extract zones
+        zones = _extract_zones(mp)
+        zone_text = _zones_to_text(zones)
+        n_zones = len(zones)
+
+        # Step 2: Find original
+        original_path = _find_original(mp)
+        if not original_path:
+            return None, mp.name, "original not found"
+
+        # Step 3: Build prompt
+        mockup_key = MOCKUP_KEY_MAP.get(mp.name, "")
+        prompt = build_mockup_prompt(mockup_key, assets, brand_name, zone_text=zone_text)
+
+        # Step 4: Choose logo variant (dark bg → white logo)
+        if mp.name in DARK_BG_MOCKUPS:
+            logo_for_ai = (
+                assets.logo_white
+                if (assets.logo_white and assets.logo_white.exists()
+                    and assets.logo_white.stat().st_size > 100)
+                else assets.logo
+            )
+        else:
+            logo_for_ai = (
+                assets.logo_transparent
+                if (assets.logo_transparent and assets.logo_transparent.exists()
+                    and assets.logo_transparent.stat().st_size > 100)
+                else assets.logo
+            )
+
+        # Step 5: AI reconstruction — NO Pillow handler
+        ai_bytes = _ai_reconstruct_with_retry(
+            original_path=original_path,
+            full_prompt=prompt,
+            logo_path=logo_for_ai,
+            api_key=_api_key,
+            zones=zones,
+        )
+
+        if ai_bytes:
+            out_path.write_bytes(ai_bytes)
+            return out_path, mp.name, f"ok zones:{n_zones} orig:{original_path.name}"
+        return None, mp.name, f"all {MAX_ATTEMPTS} attempts failed"
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time as _time
+
     for num, assets in all_assets.items():
         if assets.background and assets.background.parent.exists():
             mockup_dir = assets.background.parent / "mockups"
@@ -1828,69 +1887,39 @@ def composite_all_mockups(
         brand_name = getattr(assets, "brand_name", "") or assets.direction.direction_name
 
         total_mp = len(processed_files)
-        console.print(f"\n  Option {num} — AI compositing {total_mp} mockup(s)…")
+        console.print(f"\n  Option {num} — AI compositing {total_mp} mockup(s) [parallel]…")
+        t0 = _time.monotonic()
 
-        for mp_idx, mp in enumerate(processed_files, 1):
-            out_path = mockup_dir / (mp.stem + "_composite.png")
-            console.print(f"    → [{mp_idx}/{total_mp}] {mp.stem}…", end=" ")
-            try:
-                # ── Step 1: Extract zones programmatically (Pillow only) ───────
-                zones     = _extract_zones(mp)
-                zone_text = _zones_to_text(zones)
-                n_zones   = len(zones)
-
-                # ── Step 2: Find high-quality original ────────────────────────
-                original_path = _find_original(mp)
-                if not original_path:
-                    console.print(
-                        f"    [yellow]⚠ {mp.name}: original not found — skipping[/yellow]"
-                    )
+        # ── Run all mockups in parallel (ThreadPoolExecutor) ──────────────
+        max_workers = min(total_mp, 10)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    _composite_one, mp, assets, mockup_dir, brand_name, api_key
+                ): mp
+                for mp in processed_files
+            }
+            for future in as_completed(futures):
+                mp = futures[future]
+                try:
+                    result_path, name, status = future.result()
+                    if result_path:
+                        composited.append(result_path)
+                        ok_count += 1
+                        console.print(f"    [green]✓[/green] {name} (AI) — {status}")
+                    else:
+                        fail_count += 1
+                        console.print(f"    [yellow]⚠ {name}: {status}[/yellow]")
+                except Exception as exc:
                     fail_count += 1
-                    continue
+                    console.print(f"    [yellow]✗ {mp.name}: {exc}[/yellow]")
 
-                # ── Step 3: Build prompt with embedded zone coords ─────────────
-                mockup_key = MOCKUP_KEY_MAP.get(mp.name, "")
-                prompt     = build_mockup_prompt(
-                    mockup_key, assets, brand_name, zone_text=zone_text
-                )
-
-                # ── Step 4: AI reconstruction — original + logo only ──────────
-                # Prefer transparent logo (cleaner integration)
-                logo_for_ai = (
-                    assets.logo_transparent
-                    if (assets.logo_transparent
-                        and assets.logo_transparent.exists()
-                        and assets.logo_transparent.stat().st_size > 100)
-                    else assets.logo
-                )
-
-                ai_bytes = _ai_reconstruct_with_retry(
-                    original_path=original_path,
-                    full_prompt=prompt,
-                    logo_path=logo_for_ai,
-                    api_key=api_key,
-                    zones=zones,
-                )
-
-                if ai_bytes:
-                    out_path.write_bytes(ai_bytes)
-                    composited.append(out_path)
-                    console.print(
-                        f"[green]✓[/green]  [dim]zones:{n_zones}  orig:{original_path.name}[/dim]"
-                    )
-                    ok_count += 1
-                else:
-                    console.print(f"[yellow]⚠ all {MAX_ATTEMPTS} attempts failed — skipped[/yellow]")
-                    fail_count += 1
-
-            except Exception as exc:
-                console.print(f"[yellow]✗ ERROR: {exc}[/yellow]")
-                fail_count += 1
-
+        elapsed = _time.monotonic() - t0
         results[num] = composited
         console.print(
             f"    [dim]→ {mockup_dir}  "
-            f"({ok_count} ok  {fail_count} failed  of {len(processed_files)})[/dim]"
+            f"({ok_count} ok  {fail_count} failed  of {total_mp}  "
+            f"in {elapsed:.1f}s)[/dim]"
         )
 
     return results
@@ -1906,9 +1935,7 @@ def composite_single_mockup(
     Composite brand assets onto a single processed mockup file.
     Used for progressive delivery — call once per mockup, send result immediately.
 
-    Strategy:
-      1. Try Pillow-based compositing first (HANDLER_MAP) — pixel-perfect, deterministic.
-      2. Fall back to AI reconstruction if Pillow fails or no handler exists.
+    AI-only: uses Gemini reconstruction with original photo + brand logo.
 
     Returns the composited image Path on success, or None on failure.
     """
@@ -1932,31 +1959,7 @@ def composite_single_mockup(
             console.print(f"  [yellow]⚠ {processed_file.name}: original not found — skipping[/yellow]")
             return None
 
-        # ── Strategy 1: Pillow-based compositing (deterministic, pixel-perfect) ──
-        handler = HANDLER_MAP.get(processed_file.name)
-        if handler:
-            try:
-                processed_img = Image.open(processed_file).convert("RGBA")
-                arr = np.array(processed_img)
-                canvas = Image.open(original_path).convert("RGBA")
-
-                result_label = handler(canvas, processed_img, assets, arr)
-                if result_label and result_label != "no zones":
-                    canvas.save(out_path, "PNG")
-                    console.print(
-                        f"  [green]✓[/green] {processed_file.stem} composited (Pillow: {result_label}) → {out_path.name}"
-                    )
-                    return out_path
-                else:
-                    console.print(
-                        f"  [dim]↳ Pillow handler returned '{result_label}' — falling back to AI[/dim]"
-                    )
-            except Exception as pillow_err:
-                console.print(
-                    f"  [dim]↳ Pillow compositing failed ({pillow_err}) — falling back to AI[/dim]"
-                )
-
-        # ── Strategy 2: AI reconstruction (fallback) ─────────────────────────────
+        # ── AI reconstruction ─────────────────────────────────────────────────────
         zones     = _extract_zones(processed_file)
         zone_text = _zones_to_text(zones)
 
