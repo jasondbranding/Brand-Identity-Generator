@@ -155,29 +155,15 @@ class PipelineRunner:
             from src.parser import parse_brief
             brief = parse_brief(str(brief_dir), mode="full")
 
-            self._progress(on_progress, "🔍 *Step 2/3* — Research \\+ concept ideation\\.\\.\\.")
+            self._progress(on_progress, "🔍 *Step 2/3* — Research \\+ generating 4 brand directions\\.\\.\\.")
+
+            # ── Parallelize research + direction generation ────────────────
+            # Research uses Google Search Grounding (independent from Director).
+            # Director now handles concept ideation internally (Phase 1 of system prompt).
+            # Run both concurrently — research feeds into director if it finishes first.
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
             research_context = ""
-            try:
-                from src.validate import BriefValidator
-                validator = BriefValidator(self.api_key)
-                ctx = validator._extract_from_brief(brief)
-                if not ctx.is_complete():
-                    ctx = validator._infer_missing(brief, ctx)
-                ctx.confirmed = True
-                market_context_str = ctx.to_research_prompt()
-            except Exception:
-                market_context_str = ""
-
-            try:
-                from src.researcher import BrandResearcher
-                researcher = BrandResearcher(self.api_key)
-                res = researcher.research(brief.brief_text, brief.keywords,
-                                          market_context=market_context_str or None)
-                research_context = res.to_director_context()
-            except Exception:
-                pass
-
-            concept_cores = []
             style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
             # Fallback: read from logo_inspiration/ subfolder written by ConversationBrief
             if not style_ref_images:
@@ -188,21 +174,47 @@ class PipelineRunner:
                         p for p in logo_inspo_dir.iterdir()
                         if p.suffix.lower() in _img_exts
                     )
-            try:
-                from src.director import generate_concept_cores
-                concept_cores = generate_concept_cores(brief)
-            except Exception:
-                pass
+
+            def _do_research():
+                nonlocal research_context
+                try:
+                    from src.validate import BriefValidator
+                    validator = BriefValidator(self.api_key)
+                    ctx = validator._extract_from_brief(brief)
+                    if not ctx.is_complete():
+                        ctx = validator._infer_missing(brief, ctx)
+                    ctx.confirmed = True
+                    market_context_str = ctx.to_research_prompt()
+                except Exception:
+                    market_context_str = ""
+                try:
+                    from src.researcher import BrandResearcher
+                    researcher = BrandResearcher(self.api_key)
+                    res = researcher.research(brief.brief_text, brief.keywords,
+                                              market_context=market_context_str or None)
+                    return res.to_director_context()
+                except Exception:
+                    return ""
+
+            def _do_directions(res_context=""):
+                from src.director import generate_directions
+                return generate_directions(
+                    brief,
+                    research_context=res_context,
+                    style_ref_paths=style_ref_images or None,
+                    refinement_feedback=refinement_feedback or None,
+                )
+
+            # Run research first with short timeout, then directions with result
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                research_future = executor.submit(_do_research)
+                try:
+                    research_context = research_future.result(timeout=30)
+                except Exception:
+                    research_context = ""
 
             self._progress(on_progress, "🎨 *Step 3/3* — Director \\+ generating 4 logos\\.\\.\\.")
-            from src.director import generate_directions, BrandDirectionsOutput
-            directions_output = generate_directions(
-                brief,
-                research_context=research_context,
-                concept_cores=concept_cores or None,
-                style_ref_paths=style_ref_images or None,
-                refinement_feedback=refinement_feedback or None,
-            )
+            directions_output = _do_directions(research_context)
 
             directions_json = output_dir / "directions.json"
             _write_directions_json(directions_output, directions_json)
@@ -487,24 +499,29 @@ class PipelineRunner:
             from src.parser import parse_brief
             brief = parse_brief(str(brief_dir), mode=mode)
 
-            # ── Step 2: Market context (auto-confirm, no interactive prompt) ─
-            self._progress(on_progress, "🌍 *Step 2/6* — Phân tích thị trường\\.\\.\\.")
-            market_context_str = ""
-            try:
-                from src.validate import BriefValidator
-                validator = BriefValidator(self.api_key)
-                ctx = validator._extract_from_brief(brief)
-                if not ctx.is_complete():
-                    ctx = validator._infer_missing(brief, ctx)
-                ctx.confirmed = True
-                market_context_str = ctx.to_research_prompt()
-            except Exception as e:
-                self._progress(on_progress, f"⚠️ Market context skipped: {e}")
+            # ── Step 2: Research + brand directions (parallel) ──────────────
+            # Market context, research, and direction gen merged into fewer steps.
+            # Research runs with 30s timeout; Director handles concept ideation internally.
+            self._progress(on_progress, "🔍 *Step 2/5* — Research \\+ brand direction generation\\.\\.\\.")
+            from concurrent.futures import ThreadPoolExecutor
 
-            # ── Step 3: Market research ───────────────────────────────────────
             research_context = ""
-            if generate_images:
-                self._progress(on_progress, "🔍 *Step 3/6* — Nghiên cứu competitive landscape\\.\\.\\.")
+            style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
+
+            def _do_research_hitl():
+                market_context_str = ""
+                try:
+                    from src.validate import BriefValidator
+                    validator = BriefValidator(self.api_key)
+                    ctx = validator._extract_from_brief(brief)
+                    if not ctx.is_complete():
+                        ctx = validator._infer_missing(brief, ctx)
+                    ctx.confirmed = True
+                    market_context_str = ctx.to_research_prompt()
+                except Exception:
+                    pass
+                if not generate_images:
+                    return ""
                 try:
                     from src.researcher import BrandResearcher
                     researcher = BrandResearcher(self.api_key)
@@ -513,27 +530,23 @@ class PipelineRunner:
                         brief.keywords,
                         market_context=market_context_str or None,
                     )
-                    research_context = res.to_director_context()
-                except Exception as e:
-                    self._progress(on_progress, f"⚠️ Research skipped: {e}")
+                    return res.to_director_context()
+                except Exception:
+                    return ""
 
-            # ── Step 3.5: Concept ideation pre-pass ──────────────────────────
-            concept_cores = []
-            style_ref_images = list(getattr(brief, "style_ref_images", None) or [])
-            try:
-                from src.director import generate_concept_cores
-                self._progress(on_progress, "💡 *Step 3\\.5/6* — Concept ideation \\(tư duy hình ảnh\\)\\.\\.\\.")
-                concept_cores = generate_concept_cores(brief)
-            except Exception as e:
-                self._progress(on_progress, f"⚠️ Concept ideation skipped: {e}")
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                research_future = executor.submit(_do_research_hitl)
+                try:
+                    research_context = research_future.result(timeout=30)
+                except Exception:
+                    research_context = ""
 
-            # ── Step 4: Generate brand directions ────────────────────────────
-            self._progress(on_progress, "🎨 *Step 4/6* — Tạo brand directions\\.\\.\\.")
+            # ── Step 3: Generate brand directions ────────────────────────────
+            self._progress(on_progress, "🎨 *Step 3/5* — Tạo brand directions\\.\\.\\.")
             from src.director import generate_directions
             directions_output = generate_directions(
                 brief,
                 research_context=research_context,
-                concept_cores=concept_cores or None,
                 style_ref_paths=style_ref_images or None,
             )
 
@@ -552,12 +565,12 @@ class PipelineRunner:
                     elapsed_seconds=time.time() - start,
                 )
 
-            # ── Step 5: Generate images + palette + shades ───────────────────
+            # ── Step 4: Generate images + palette + shades ───────────────────
             n_dirs = len(directions_output.directions)
             self._progress(
                 on_progress,
-                f"🖼 *Step 5/6* — Generating images \\({n_dirs} directions\\)\\.\\.\\.\n"
-                f"_\\(background \\+ logo \\+ pattern \\+ palette \\+ shades — ~3\\-8 min\\)_"
+                f"🖼 *Step 4/5* — Generating images \\({n_dirs} directions\\)\\.\\.\\.\\n"
+                f"_\\(logo \\+ pattern \\+ palette \\+ shades — ~1\\-2 min\\)_"
             )
             from src.generator import generate_all_assets
             all_assets = generate_all_assets(
