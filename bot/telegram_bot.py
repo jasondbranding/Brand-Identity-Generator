@@ -1726,9 +1726,9 @@ async def step_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return ConversationHandler.END
 
-    # confirm_go → show reference preview first
-    await query.edit_message_text("🔍 Đang tìm visual references\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
-    return await step_ref_choice_show(update, context)
+    # confirm_go → launch pipeline directly, skipping ref suggestion
+    await query.edit_message_text("⚡ Bắt đầu generate\\!", parse_mode=ParseMode.MARKDOWN_V2)
+    return await _launch_pipeline(update, context)
 
 
 # ── Pipeline Phase 1: concept ideation + 4 logos ──────────────────────────────
