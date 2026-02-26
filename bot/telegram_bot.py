@@ -1741,7 +1741,7 @@ async def step_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     # confirm_go → ask user for their own ref (REF_UPLOAD state)
     await query.edit_message_text(
-        "📁 *Upload ảnh ref của bạn (tuỳ chọn)\\.*\n\n"
+        "📁 *Upload ảnh ref của bạn \\(tuỳ chọn\\)\\.*\n\n"
         "Gửi 1–2 ảnh logo theo style bạn muốn\\. AI sẽ học render style từ đó\\.\n\n"
         "👉 _Hoặc gõ /skip để bỏ qua phần này và bắt đầu cấu trúc logo\\._",
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -2066,6 +2066,13 @@ async def _run_logo_variants_and_palette_phase(
     """
     runner = PipelineRunner(api_key=api_key)
     direction_name = escape_md(getattr(chosen_direction, "direction_name", ""))
+
+    # ── Recover brief_dir if missing or deleted (e.g. bot restart) ─────────
+    if not brief_dir or not brief_dir.exists():
+        if brief and brief.brand_name:
+            brief_dir = brief.write_to_temp_dir()
+            context.user_data[TEMP_DIR_KEY] = str(brief_dir)
+            logger.info(f"Recovered brief_dir for logo+palette phase → {brief_dir}")
 
     # ── Step 1: Logo variants ─────────────────────────────────────────────────
     logo_path = getattr(chosen_assets, "logo", None) if chosen_assets else None
@@ -2913,6 +2920,14 @@ def build_app(token: str) -> Application:
             TONE: [
                 CallbackQueryHandler(step_tone_callback, pattern="^tone_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_tone_text),
+            ],
+            CORE_PROMISE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, step_core_promise),
+                CommandHandler("skip", step_core_promise),
+            ],
+            COLOR_PREFERENCES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, step_color_preferences),
+                CommandHandler("skip", step_color_preferences),
             ],
             GEOGRAPHY: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, step_geography),
