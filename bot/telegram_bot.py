@@ -1962,7 +1962,7 @@ async def step_logo_review_text(update: Update, context: ContextTypes.DEFAULT_TY
 
     progress_msg = await update.message.reply_text(
         f"🔄 *Đang tái tạo logos theo feedback\\.\\.\\.*\n\n"
-        f"_\"{escape_md(text[:100])}_\"",
+        f"_\"{escape_md(text[:100])}\"_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
@@ -2275,7 +2275,7 @@ async def step_palette_review_text(update: Update, context: ContextTypes.DEFAULT
 
     progress_msg = await update.message.reply_text(
         f"🔄 *Đang tạo lại bảng màu theo feedback\\.\\.\\.*\n\n"
-        f"_\"{escape_md(text[:100])}_\"",
+        f"_\"{escape_md(text[:100])}\"_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     _launch_palette_rerun(context, chat_id, refinement_feedback=text)
@@ -2674,7 +2674,7 @@ async def step_pattern_review_text(update: Update, context: ContextTypes.DEFAULT
 
     await update.message.reply_text(
         f"🔄 *Đang tạo lại hoạ tiết theo feedback\\.\\.\\.*\n\n"
-        f"_\"{escape_md(text[:100])}_\"",
+        f"_\"{escape_md(text[:100])}\"_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
     asyncio.create_task(_run_pattern_generation(context, chat_id, refinement_feedback=text))
